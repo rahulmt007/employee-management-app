@@ -6,29 +6,35 @@ on:
       - main
 
 jobs:
-
-  build:
-
+  deploy:
     runs-on: ubuntu-latest
 
     steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
 
-    - name: Checkout Repository
-      uses: actions/checkout@v4
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
 
-    - name: Validate PHP
-      run: |
-        php -l index.php
-        php -l healthcheck.php
+      - name: Upload project to S3
+        run: |
+          zip -r app.zip .
+          aws s3 cp app.zip s3://${{ secrets.S3_BUCKET_NAME }}/app.zip
 
-    - name: Create Deployment Package
-      run: |
-        zip -r employee-management-app.zip . \
-          -x "*.git*" \
-          -x "README.md"
-
-    - name: Upload Artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: employee-management-app
-        path: employee-management-app.zip
+      - name: Deploy to EC2 using SSM
+        run: |
+          aws ssm send-command \
+            --instance-ids "${{ secrets.EC2_INSTANCE_ID }}" \
+            --document-name "AWS-RunShellScript" \
+            --comment "GitHub Deployment" \
+            --parameters commands='[
+              "cd /home/ec2-user",
+              "aws s3 cp s3://${{ secrets.S3_BUCKET_NAME }}/app.zip .",
+              "rm -rf employee-management-app",
+              "unzip -o app.zip -d employee-management-app",
+              "sudo systemctl restart httpd"
+            ]'
