@@ -1,0 +1,34 @@
+name: AWS Employee Management CI/CD
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+
+  build:
+
+    runs-on: ubuntu-latest
+
+    steps:
+
+    - name: Checkout Repository
+      uses: actions/checkout@v4
+
+    - name: Validate PHP
+      run: |
+        php -l index.php
+        php -l healthcheck.php
+
+    - name: Create Deployment Package
+      run: |
+        zip -r employee-management-app.zip . \
+          -x "*.git*" \
+          -x "README.md"
+
+    - name: Upload Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: employee-management-app
+        path: employee-management-app.zip
