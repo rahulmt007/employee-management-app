@@ -1,63 +1,78 @@
 #!/bin/bash
 
-set -e
+set -euo pipefail
 
-source scripts/common.sh
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/common.sh"
 
-echo_log "========== Deployment Started =========="
-
-# Required environment variables
 : "${S3_BUCKET:?S3_BUCKET is not set}"
 : "${ARTIFACT_NAME:?ARTIFACT_NAME is not set}"
 
+ARTIFACT_PATH="/tmp/${ARTIFACT_NAME}"
+
+echo_log "========== Deployment Started =========="
+
+PREVIOUS_RELEASE=$(readlink -f "$CURRENT_LINK" 2>/dev/null || true)
+
+echo_log "Creating release directory: $RELEASE_NAME"
+
 mkdir -p "$RELEASE_DIR"
 
-echo_log "Downloading artifact..."
+echo_log "Downloading artifact from S3"
 
 aws s3 cp \
 "s3://${S3_BUCKET}/${ARTIFACT_NAME}" \
-"/tmp/${ARTIFACT_NAME}"
+"$ARTIFACT_PATH"
 
-echo_log "Extracting artifact..."
+echo_log "Extracting artifact"
 
-unzip -oq "/tmp/${ARTIFACT_NAME}" -d "$RELEASE_DIR"
+unzip -oq "$ARTIFACT_PATH" -d "$RELEASE_DIR"
 
 if [ ! -f "$RELEASE_DIR/index.php" ]; then
-    echo_log "Deployment failed: index.php not found."
+    echo_log "index.php not found in release." "ERROR"
     exit 1
 fi
 
-echo_log "Creating backup..."
+echo_log "Updating current release"
 
-bash scripts/backup.sh
+ln -sfn "$RELEASE_DIR" "$CURRENT_LINK"
 
-echo_log "Deploying application..."
+echo_log "Setting permissions"
 
-sudo rsync -av --delete \
-"$RELEASE_DIR"/ \
-/var/www/html/
+sudo chown -R apache:apache "$RELEASE_DIR"
 
-sudo chown -R apache:apache /var/www/html
+find "$RELEASE_DIR" -type d -exec chmod 755 {} \;
+find "$RELEASE_DIR" -type f -exec chmod 644 {} \;
 
-sudo find /var/www/html -type d -exec chmod 755 {} \;
-
-sudo find /var/www/html -type f -exec chmod 644 {} \;
-
-echo_log "Restarting Apache..."
+echo_log "Restarting Apache"
 
 sudo systemctl restart httpd
 
-echo_log "Running health check..."
+echo_log "Running health check"
 
-if bash scripts/healthcheck.sh
+if bash "$SCRIPT_DIR/verify_deployment.sh"
 then
     echo_log "Deployment successful."
 else
-    echo_log "Deployment failed. Rolling back..."
-    bash scripts/rollback.sh
+
+    echo_log "Health check failed." "ERROR"
+
+    if [ -n "$PREVIOUS_RELEASE" ]; then
+
+        echo_log "Rolling back to previous release"
+
+        ln -sfn "$PREVIOUS_RELEASE" "$CURRENT_LINK"
+
+        sudo systemctl restart httpd
+
+    fi
+
     exit 1
+
 fi
 
-bash scripts/cleanup.sh
+rm -f "$ARTIFACT_PATH"
+
+bash "$SCRIPT_DIR/prune_releases.sh"
 
 echo_log "========== Deployment Finished =========="
