@@ -1,15 +1,24 @@
-name: AWS Employee Management CI/CD
+name: Deploy Employee Management Application
 
 on:
   push:
     branches:
       - main
 
+permissions:
+  contents: read
+
+env:
+  AWS_REGION: ${{ secrets.AWS_REGION }}
+  S3_BUCKET: ${{ secrets.S3_BUCKET_NAME }}
+
 jobs:
   deploy:
+    name: Build and Deploy
     runs-on: ubuntu-latest
 
     steps:
+
       - name: Checkout Repository
         uses: actions/checkout@v4
 
@@ -18,23 +27,68 @@ jobs:
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ secrets.AWS_REGION }}
+          aws-region: ${{ env.AWS_REGION }}
 
-      - name: Upload project to S3
+      - name: Generate Build Information
+        id: build
         run: |
-          zip -r app.zip .
-          aws s3 cp app.zip s3://${{ secrets.S3_BUCKET_NAME }}/app.zip
+          TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+          SHORT_SHA=$(git rev-parse --short HEAD)
 
-      - name: Deploy to EC2 using SSM
+          ARTIFACT_NAME="employee-management-${TIMESTAMP}-${SHORT_SHA}.zip"
+
+          echo "artifact=$ARTIFACT_NAME" >> $GITHUB_OUTPUT
+
+      - name: Package Application
         run: |
-          aws ssm send-command \
-            --instance-ids "${{ secrets.EC2_INSTANCE_ID }}" \
+          zip -r "${{ steps.build.outputs.artifact }}" \
+            index.php \
+            healthcheck.php \
+            assets \
+            scripts \
+            sql \
+            README.md
+
+      - name: Upload Artifact to S3
+        run: |
+          aws s3 cp \
+            "${{ steps.build.outputs.artifact }}" \
+            "s3://${S3_BUCKET}/${{ steps.build.outputs.artifact }}"
+
+      - name: Deploy via Systems Manager
+        id: deploy
+        run: |
+
+          COMMAND_ID=$(aws ssm send-command \
             --document-name "AWS-RunShellScript" \
+            --targets \
+              "Key=tag:Application,Values=EmployeeManagement" \
+              "Key=tag:Environment,Values=Production" \
+            --parameters 'commands=[
+              "export S3_BUCKET='"${S3_BUCKET}"'",
+              "export ARTIFACT_NAME='"${{ steps.build.outputs.artifact }}"'",
+              "bash /opt/employee-app/scripts/deploy.sh"
+            ]' \
             --comment "GitHub Deployment" \
-            --parameters commands='[
-              "cd /home/ec2-user",
-              "aws s3 cp s3://${{ secrets.S3_BUCKET_NAME }}/app.zip .",
-              "rm -rf employee-management-app",
-              "unzip -o app.zip -d employee-management-app",
-              "sudo systemctl restart httpd"
-            ]'
+            --query "Command.CommandId" \
+            --output text)
+
+          echo "command_id=$COMMAND_ID" >> $GITHUB_OUTPUT
+
+      - name: Wait for Deployment
+        run: |
+
+          aws ssm wait command-executed \
+            --command-id "${{ steps.deploy.outputs.command_id }}" \
+            --instance-id $(aws ec2 describe-instances \
+              --filters \
+                Name=tag:Application,Values=EmployeeManagement \
+                Name=tag:Environment,Values=Production \
+                Name=instance-state-name,Values=running \
+              --query "Reservations[0].Instances[0].InstanceId" \
+              --output text)
+
+      - name: Deployment Summary
+        run: |
+          echo "Deployment completed successfully."
+          echo "Artifact: ${{ steps.build.outputs.artifact }}"
