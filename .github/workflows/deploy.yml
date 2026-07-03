@@ -1,20 +1,16 @@
-name: Deploy Employee Management Application
+name: Build Deployment Artifact
 
 on:
   push:
     branches:
-      - main
+      - refactor/v2-enterprise-pipeline
 
 permissions:
   contents: read
 
-env:
-  AWS_REGION: ${{ secrets.AWS_REGION }}
-  S3_BUCKET: ${{ secrets.S3_BUCKET_NAME }}
-
 jobs:
-  deploy:
-    name: Build and Deploy
+  build:
+
     runs-on: ubuntu-latest
 
     steps:
@@ -22,73 +18,40 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Configure AWS Credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ env.AWS_REGION }}
+      - name: Validate Repository Structure
+        run: |
+          test -f index.php
+          test -f healthcheck.php
+          test -d scripts
+          test -d assets
+          test -d sql
 
-      - name: Generate Build Information
-        id: build
+      - name: Generate Build Metadata
+        id: metadata
         run: |
           TIMESTAMP=$(date +%Y%m%d-%H%M%S)
           SHORT_SHA=$(git rev-parse --short HEAD)
 
-          ARTIFACT_NAME="employee-management-${TIMESTAMP}-${SHORT_SHA}.zip"
+          echo "timestamp=$TIMESTAMP" >> $GITHUB_OUTPUT
+          echo "sha=$SHORT_SHA" >> $GITHUB_OUTPUT
+          echo "artifact=employee-management-${TIMESTAMP}-${SHORT_SHA}.zip" >> $GITHUB_OUTPUT
 
-          echo "artifact=$ARTIFACT_NAME" >> $GITHUB_OUTPUT
-
-      - name: Package Application
+      - name: Build Deployment Artifact
         run: |
-          zip -r "${{ steps.build.outputs.artifact }}" \
-            index.php \
-            healthcheck.php \
-            assets \
-            scripts \
-            sql \
-            README.md
+          zip -r \
+          "${{ steps.metadata.outputs.artifact }}" \
+          . \
+          -x ".git/*" \
+             ".github/*" \
+             "docs/*" \
+             "screenshots/*"
 
-      - name: Upload Artifact to S3
+      - name: Verify Artifact
         run: |
-          aws s3 cp \
-            "${{ steps.build.outputs.artifact }}" \
-            "s3://${S3_BUCKET}/${{ steps.build.outputs.artifact }}"
+          unzip -l "${{ steps.metadata.outputs.artifact }}"
 
-      - name: Deploy via Systems Manager
-        id: deploy
-        run: |
-
-          COMMAND_ID=$(aws ssm send-command \
-            --document-name "AWS-RunShellScript" \
-            --targets \
-              "Key=tag:Application,Values=EmployeeManagement" \
-              "Key=tag:Environment,Values=Production" \
-            --parameters 'commands=[
-              "export S3_BUCKET='"${S3_BUCKET}"'",
-              "export ARTIFACT_NAME='"${{ steps.build.outputs.artifact }}"'",
-              "bash /opt/employee-app/scripts/deploy.sh"
-            ]' \
-            --comment "GitHub Deployment" \
-            --query "Command.CommandId" \
-            --output text)
-
-          echo "command_id=$COMMAND_ID" >> $GITHUB_OUTPUT
-
-      - name: Wait for Deployment
-        run: |
-
-          aws ssm wait command-executed \
-            --command-id "${{ steps.deploy.outputs.command_id }}" \
-            --instance-id $(aws ec2 describe-instances \
-              --filters \
-                Name=tag:Application,Values=EmployeeManagement \
-                Name=tag:Environment,Values=Production \
-                Name=instance-state-name,Values=running \
-              --query "Reservations[0].Instances[0].InstanceId" \
-              --output text)
-
-      - name: Deployment Summary
-        run: |
-          echo "Deployment completed successfully."
-          echo "Artifact: ${{ steps.build.outputs.artifact }}"
+      - name: Upload Workflow Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: deployment-package
+          path: ${{ steps.metadata.outputs.artifact }}
