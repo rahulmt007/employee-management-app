@@ -1,21 +1,28 @@
 #!/bin/bash
 
-source scripts/common.sh
+set -Eeuo pipefail
 
-echo_log "Rollback initiated..."
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/common.sh"
 
-LATEST_BACKUP=$(ls -td "$BACKUP_DIR"/* | head -1)
+echo_log "Starting rollback..."
 
-if [ -z "$LATEST_BACKUP" ]; then
-
-    echo_log "No backup found."
-
-    exit 1
-
+if [[ ! -f "$BACKUP_DIR/previous_release" ]]; then
+    fail "No rollback information available."
 fi
 
-ln -sfn "$LATEST_BACKUP" "$CURRENT_LINK"
+PREVIOUS_RELEASE=$(cat "$BACKUP_DIR/previous_release")
+
+if [[ ! -d "$PREVIOUS_RELEASE" ]]; then
+    fail "Previous release does not exist."
+fi
+
+ln -sfn "$PREVIOUS_RELEASE" "$CURRENT_LINK"
 
 sudo systemctl restart httpd
 
 echo_log "Rollback completed."
+
+bash "$SCRIPT_DIR/verify_deployment.sh"
+
+echo_log "Rollback verified successfully."

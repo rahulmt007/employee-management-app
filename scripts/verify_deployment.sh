@@ -1,19 +1,26 @@
 #!/bin/bash
 
-source scripts/common.sh
+set -Eeuo pipefail
 
-echo_log "Running Health Check..."
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/common.sh"
 
-STATUS=$(curl -s http://localhost/healthcheck.php)
+echo_log "Performing deployment verification..."
 
-if [[ "$STATUS" == "OK" ]]; then
+HTTP_CODE=$(curl \
+    --silent \
+    --output /dev/null \
+    --write-out "%{http_code}" \
+    http://localhost/healthcheck.php)
 
-    echo_log "Health Check Passed"
-
-    exit 0
-
+if [[ "$HTTP_CODE" != "200" ]]; then
+    fail "Health check returned HTTP $HTTP_CODE"
 fi
 
-echo_log "Health Check Failed"
+BODY=$(curl --silent http://localhost/healthcheck.php)
 
-exit 1
+if [[ "$BODY" != "OK" ]]; then
+    fail "Unexpected health check response: $BODY"
+fi
+
+echo_log "Health check passed."

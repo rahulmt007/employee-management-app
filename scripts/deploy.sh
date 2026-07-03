@@ -1,77 +1,61 @@
 #!/bin/bash
 
-set -euo pipefail
+set -Eeuo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/common.sh"
 
-: "${S3_BUCKET:?S3_BUCKET is not set}"
-: "${ARTIFACT_NAME:?ARTIFACT_NAME is not set}"
-
-ARTIFACT_PATH="/tmp/${ARTIFACT_NAME}"
-
 echo_log "========== Deployment Started =========="
 
-PREVIOUS_RELEASE=$(readlink -f "$CURRENT_LINK" 2>/dev/null || true)
+# Verify extracted artifact exists
+if [[ ! -f "$ARTIFACT_DIR/index.php" ]]; then
+    fail "Deployment artifact not found at $ARTIFACT_DIR"
+fi
 
-echo_log "Creating release directory: $RELEASE_NAME"
+echo_log "Creating backup..."
+
+bash "$SCRIPT_DIR/backup.sh"
+
+echo_log "Creating release directory..."
 
 mkdir -p "$RELEASE_DIR"
 
-echo_log "Downloading artifact from S3"
+echo_log "Copying application files..."
 
-aws s3 cp \
-"s3://${S3_BUCKET}/${ARTIFACT_NAME}" \
-"$ARTIFACT_PATH"
+rsync -a --delete \
+    "$ARTIFACT_DIR"/ \
+    "$RELEASE_DIR"/
 
-echo_log "Extracting artifact"
-
-unzip -oq "$ARTIFACT_PATH" -d "$RELEASE_DIR"
-
-if [ ! -f "$RELEASE_DIR/index.php" ]; then
-    echo_log "index.php not found in release." "ERROR"
-    exit 1
-fi
-
-echo_log "Updating current release"
+echo_log "Updating current release..."
 
 ln -sfn "$RELEASE_DIR" "$CURRENT_LINK"
 
-echo_log "Setting permissions"
+echo_log "Setting permissions..."
 
 sudo chown -R apache:apache "$RELEASE_DIR"
 
 find "$RELEASE_DIR" -type d -exec chmod 755 {} \;
+
 find "$RELEASE_DIR" -type f -exec chmod 644 {} \;
 
-echo_log "Restarting Apache"
+echo_log "Restarting Apache..."
 
 sudo systemctl restart httpd
 
-echo_log "Running health check"
+echo_log "Running deployment verification..."
 
 if bash "$SCRIPT_DIR/verify_deployment.sh"
 then
-    echo_log "Deployment successful."
+    echo_log "Deployment verification passed."
 else
+    echo_log "Deployment verification failed." "ERROR"
 
-    echo_log "Health check failed." "ERROR"
+    bash "$SCRIPT_DIR/rollback.sh"
 
-    if [ -n "$PREVIOUS_RELEASE" ]; then
-
-        echo_log "Rolling back to previous release"
-
-        ln -sfn "$PREVIOUS_RELEASE" "$CURRENT_LINK"
-
-        sudo systemctl restart httpd
-
-    fi
-
-    exit 1
-
+    fail "Rollback completed."
 fi
 
-rm -f "$ARTIFACT_PATH"
+echo_log "Pruning old releases..."
 
 bash "$SCRIPT_DIR/prune_releases.sh"
 

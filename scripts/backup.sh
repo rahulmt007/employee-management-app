@@ -1,23 +1,22 @@
 #!/bin/bash
 
-source scripts/common.sh
+set -Eeuo pipefail
 
-echo_log "Starting backup..."
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/common.sh"
 
-mkdir -p "$BACKUP_DIR"
+echo_log "Creating deployment backup..."
 
-if [ -L "$CURRENT_LINK" ]; then
+if [[ -L "$CURRENT_LINK" ]]; then
 
-    CURRENT_RELEASE=$(readlink -f "$CURRENT_LINK")
+    PREVIOUS_RELEASE=$(readlink -f "$CURRENT_LINK")
 
-    BACKUP_NAME=$(basename "$CURRENT_RELEASE")
+    echo "$PREVIOUS_RELEASE" > "$BACKUP_DIR/previous_release"
 
-    cp -R "$CURRENT_RELEASE" "$BACKUP_DIR/$BACKUP_NAME"
-
-    echo_log "Backup completed."
+    echo_log "Previous release recorded: $PREVIOUS_RELEASE"
 
 else
 
-    echo_log "No previous deployment found."
+    echo_log "No existing deployment found."
 
 fi
