@@ -10,48 +10,62 @@ permissions:
 
 jobs:
   build:
-    name: Build and Upload Artifact
+    name: Build and Publish Deployment Artifact
     runs-on: ubuntu-latest
 
     steps:
+      ####################################################################
+      # Checkout
+      ####################################################################
+
       - name: Checkout Repository
         uses: actions/checkout@v4
+
+      ####################################################################
+      # Validate Repository
+      ####################################################################
 
       - name: Validate Repository Structure
         shell: bash
         run: |
           set -e
 
-          echo "Current directory:"
+          echo "Repository Root:"
           pwd
 
           echo ""
-          echo "Repository contents:"
+          echo "Repository Contents:"
           ls -la
+
+          echo ""
+          echo "Application:"
+          ls -la app
 
           echo ""
           echo "Scripts:"
           ls -la scripts
 
           echo ""
-          echo "SQL:"
-          ls -la sql
-
-          echo ""
           echo "Checking required files..."
 
-          test -f index.php
-          test -f healthcheck.php
+          test -f app/index.php
+          test -f app/healthcheck.php
+
           test -f scripts/deploy.sh
           test -f scripts/common.sh
           test -f scripts/backup.sh
           test -f scripts/rollback.sh
           test -f scripts/verify_deployment.sh
           test -f scripts/prune_releases.sh
-          test -f sql/database.sql
+
+          test -f app/sql/database.sql
 
           echo ""
           echo "Repository validation passed."
+
+      ####################################################################
+      # Build Metadata
+      ####################################################################
 
       - name: Generate Build Metadata
         id: metadata
@@ -60,32 +74,100 @@ jobs:
           TIMESTAMP=$(date +%Y%m%d-%H%M%S)
           SHORT_SHA=$(git rev-parse --short HEAD)
 
-          ARTIFACT_NAME="employee-management-${TIMESTAMP}-${SHORT_SHA}.zip"
+          ARTIFACT="employee-management-${TIMESTAMP}-${SHORT_SHA}.zip"
 
           echo "timestamp=$TIMESTAMP" >> "$GITHUB_OUTPUT"
           echo "sha=$SHORT_SHA" >> "$GITHUB_OUTPUT"
-          echo "artifact=$ARTIFACT_NAME" >> "$GITHUB_OUTPUT"
+          echo "artifact=$ARTIFACT" >> "$GITHUB_OUTPUT"
 
-          echo "Artifact Name: $ARTIFACT_NAME"
+          echo "Artifact: $ARTIFACT"
+
+      ####################################################################
+      # Assemble Deployment Package
+      ####################################################################
+
+      - name: Assemble Deployment Package
+        shell: bash
+        run: |
+          set -e
+
+          echo "Creating build workspace..."
+
+          rm -rf build
+
+          mkdir -p build/app
+          mkdir -p build/scripts
+
+          echo "Copying application..."
+
+          cp -R app/. build/app/
+
+          echo "Copying deployment scripts..."
+
+          cp -R scripts/. build/scripts/
+
+          echo "Generating VERSION..."
+
+          cat > build/VERSION <<EOF
+          Application : Employee Management
+          Build Time  : ${{ steps.metadata.outputs.timestamp }}
+          Commit      : ${{ steps.metadata.outputs.sha }}
+          Branch      : ${{ github.ref_name }}
+          Repository  : ${{ github.repository }}
+          EOF
+
+          echo "Generating manifest..."
+
+          cat > build/manifest.json <<EOF
+          {
+            "application": "employee-management",
+            "artifact": "${{ steps.metadata.outputs.artifact }}",
+            "commit": "${{ steps.metadata.outputs.sha }}",
+            "branch": "${{ github.ref_name }}",
+            "repository": "${{ github.repository }}",
+            "timestamp": "${{ steps.metadata.outputs.timestamp }}"
+          }
+          EOF
+
+      ####################################################################
+      # Show Build Layout
+      ####################################################################
+
+      - name: Display Build Directory
+        shell: bash
+        run: |
+          echo "Build directory:"
+          find build
+
+      ####################################################################
+      # Build ZIP
+      ####################################################################
 
       - name: Build Deployment Artifact
         shell: bash
         run: |
-          zip -r "${{ steps.metadata.outputs.artifact }}" . \
-            -x ".git/*" \
-               ".github/*" \
-               "docs/*" \
-               "screenshots/*"
+          cd build
+
+          zip -r "../${{ steps.metadata.outputs.artifact }}" .
+
+      ####################################################################
+      # Verify ZIP
+      ####################################################################
 
       - name: Verify Deployment Artifact
         shell: bash
         run: |
-          echo "Artifact details:"
+          echo "Artifact Details"
+
           ls -lh "${{ steps.metadata.outputs.artifact }}"
 
           echo ""
-          echo "Archive contents:"
+
           unzip -l "${{ steps.metadata.outputs.artifact }}"
+
+      ####################################################################
+      # Upload to GitHub Artifacts
+      ####################################################################
 
       - name: Upload Workflow Artifact
         uses: actions/upload-artifact@v4
@@ -94,12 +176,20 @@ jobs:
           path: ${{ steps.metadata.outputs.artifact }}
           if-no-files-found: error
 
+      ####################################################################
+      # Configure AWS
+      ####################################################################
+
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ secrets.AWS_REGION }}
+
+      ####################################################################
+      # Upload to S3
+      ####################################################################
 
       - name: Upload Artifact to S3
         shell: bash
@@ -108,14 +198,33 @@ jobs:
             "${{ steps.metadata.outputs.artifact }}" \
             "s3://${{ secrets.S3_BUCKET_NAME }}/${{ steps.metadata.outputs.artifact }}"
 
+      ####################################################################
+      # Verify Upload
+      ####################################################################
+
       - name: Verify S3 Upload
         shell: bash
         run: |
           aws s3 ls \
             "s3://${{ secrets.S3_BUCKET_NAME }}/${{ steps.metadata.outputs.artifact }}"
 
+      ####################################################################
+      # Summary
+      ####################################################################
+
       - name: Build Summary
         shell: bash
         run: |
-          echo "Build completed successfully."
-          echo "Artifact: ${{ steps.metadata.outputs.artifact }}"
+          echo ""
+          echo "======================================"
+          echo " Build Completed Successfully"
+          echo "======================================"
+          echo ""
+          echo "Artifact:"
+          echo "${{ steps.metadata.outputs.artifact }}"
+          echo ""
+          echo "Repository:"
+          echo "${{ github.repository }}"
+          echo ""
+          echo "Branch:"
+          echo "${{ github.ref_name }}"
