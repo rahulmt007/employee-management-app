@@ -183,7 +183,7 @@ jobs:
 
         echo "s3://${S3_BUCKET}/${{ steps.metadata.outputs.artifact }}"
     
-        ####################################################################
+      ####################################################################
     # Discover Running EC2 Instances
     ####################################################################
 
@@ -191,24 +191,26 @@ jobs:
       id: discover
       shell: bash
       run: |
+        set -e
 
-        echo "Discovering running instances in Auto Scaling Group..."
+        echo "Discovering instances in ASG: ${ASG_NAME}"
 
         INSTANCE_IDS=$(aws autoscaling describe-auto-scaling-groups \
           --auto-scaling-group-names "${ASG_NAME}" \
-          --query "AutoScalingGroups[0].Instances[?LifecycleState=='InService'].InstanceId" \
+          --query 'AutoScalingGroups[0].Instances[].InstanceId' \
           --output text)
 
-        if [ -z "$INSTANCE_IDS" ]; then
-          echo "No running instances found."
+        echo "Raw output: $INSTANCE_IDS"
+
+        if [ -z "$INSTANCE_IDS" ] || [ "$INSTANCE_IDS" = "None" ]; then
+          echo "ERROR: No instances found."
           exit 1
         fi
 
-        echo ""
-        echo "Instances Found:"
-        echo "$INSTANCE_IDS"
-
         echo "instance_ids=$INSTANCE_IDS" >> "$GITHUB_OUTPUT"
+
+        echo "Instances:"
+        echo "$INSTANCE_IDS"
 
     ####################################################################
     # Send SSM Deployment Command
