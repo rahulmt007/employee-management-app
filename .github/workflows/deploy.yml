@@ -1,4 +1,4 @@
-name: Build & Deploy Employee Management
+name: Enterprise Deployment Pipeline
 
 on:
   push:
@@ -8,197 +8,489 @@ on:
 permissions:
   contents: read
 
+env:
+  AWS_REGION: ap-south-1
+  S3_BUCKET: rahulmt007-employee-management-artifacts
+  ASG_NAME: capstone-asg
+  APPLICATION_NAME: EmployeeManagement
+
 jobs:
-
   deploy:
-
+    name: Build and Deploy
     runs-on: ubuntu-latest
-
-    env:
-      ASG_NAME: capstone-asg
 
     steps:
 
-      #########################################################################
-      # Checkout
-      #########################################################################
+    ####################################################################
+    # Checkout
+    ####################################################################
 
-      - name: Checkout Repository
-        uses: actions/checkout@v4
+    - name: Checkout Repository
+      uses: actions/checkout@v4
 
-      #########################################################################
-      # Validate Repository
-      #########################################################################
+    ####################################################################
+    # Validate Repository
+    ####################################################################
 
-      - name: Validate Repository
-        run: |
-          set -e
+    - name: Validate Repository Structure
+      shell: bash
+      run: |
 
-          test -d app
-          test -d scripts
+        set -e
 
-          test -f app/index.php
-          test -f app/healthcheck.php
-          test -f app/sql/database.sql
+        echo "Repository Root:"
+        pwd
 
-          test -f scripts/bootstrap.sh
-          test -f scripts/deploy.sh
+        echo ""
+        echo "Repository Contents"
+        ls -la
 
-          echo "Repository validation passed."
+        echo ""
+        echo "Application"
+        ls -la app
 
-      #########################################################################
-      # Build Metadata
-      #########################################################################
+        echo ""
+        echo "Scripts"
+        ls -la scripts
 
-      - name: Generate Build Metadata
-        id: metadata
-        run: |
-          TIMESTAMP=$(date +%Y%m%d-%H%M%S)
-          SHORT_SHA=$(git rev-parse --short HEAD)
+        test -d app
+        test -d scripts
 
-          ARTIFACT="employee-management-${TIMESTAMP}-${SHORT_SHA}.zip"
+        test -f app/index.php
+        test -f app/healthcheck.php
+        test -f app/sql/database.sql
 
-          echo "artifact=$ARTIFACT" >> "$GITHUB_OUTPUT"
+        test -f scripts/bootstrap.sh
+        test -f scripts/common.sh
+        test -f scripts/deploy.sh
+        test -f scripts/backup.sh
+        test -f scripts/rollback.sh
+        test -f scripts/prune_releases.sh
+        test -f scripts/verify_deployment.sh
 
-      #########################################################################
-      # Build Artifact
-      #########################################################################
+        echo ""
+        echo "Repository validation passed."
 
-      - name: Prepare Build Directory
-        run: |
-          mkdir build
+    ####################################################################
+    # Build Metadata
+    ####################################################################
 
-          cp -r app build/
-          cp -r scripts build/
+    - name: Generate Build Metadata
+      id: metadata
+      shell: bash
+      run: |
 
-          echo "${{ github.sha }}" > build/VERSION
+        TIMESTAMP=$(date +%Y%m%d-%H%M%S)
 
-          cat > build/manifest.json <<EOF
-          {
-            "commit":"${{ github.sha }}",
-            "branch":"${{ github.ref_name }}",
-            "build":"${{ github.run_number }}"
-          }
-          EOF
+        SHORT_SHA=$(git rev-parse --short HEAD)
 
-      #########################################################################
-      # Package
-      #########################################################################
+        ARTIFACT_NAME="${APPLICATION_NAME}-${TIMESTAMP}-${SHORT_SHA}.zip"
 
-      - name: Package Deployment Artifact
-        run: |
-          cd build
+        echo "timestamp=$TIMESTAMP" >> "$GITHUB_OUTPUT"
+        echo "sha=$SHORT_SHA" >> "$GITHUB_OUTPUT"
+        echo "artifact=$ARTIFACT_NAME" >> "$GITHUB_OUTPUT"
 
-          zip -r \
-            "../${{ steps.metadata.outputs.artifact }}" \
-            .
+    ####################################################################
+    # Prepare Build Directory
+    ####################################################################
 
-      #########################################################################
-      # Verify ZIP
-      #########################################################################
+    - name: Prepare Build Directory
+      shell: bash
+      run: |
 
-      - name: Verify Artifact
-        run: |
-          unzip -l "${{ steps.metadata.outputs.artifact }}"
+        rm -rf build
 
-      #########################################################################
-      # Upload GitHub Artifact
-      #########################################################################
+        mkdir -p build
 
-      - name: Upload Workflow Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: deployment-package
-          path: ${{ steps.metadata.outputs.artifact }}
+        cp -R app build/
 
-      #########################################################################
-      # AWS Login
-      #########################################################################
+        cp -R scripts build/
 
-      - name: Configure AWS Credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ secrets.AWS_REGION }}
+        cat > build/manifest.json <<EOF
+        {
+          "application":"${APPLICATION_NAME}",
+          "commit":"${GITHUB_SHA}",
+          "branch":"${GITHUB_REF_NAME}",
+          "workflow":"${GITHUB_WORKFLOW}",
+          "run":"${GITHUB_RUN_NUMBER}",
+          "timestamp":"$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+        }
+        EOF
 
-      #########################################################################
-      # Upload to S3
-      #########################################################################
+        echo "${GITHUB_SHA}" > build/VERSION
 
-      - name: Upload Artifact to S3
-        run: |
-          aws s3 cp \
-            "${{ steps.metadata.outputs.artifact }}" \
-            "s3://${{ secrets.S3_BUCKET_NAME }}/${{ steps.metadata.outputs.artifact }}"
+    ####################################################################
+    # Build Deployment Package
+    ####################################################################
 
-      #########################################################################
-      # Discover ASG Instances
-      #########################################################################
+    - name: Build Deployment Package
+      shell: bash
+      run: |
 
-      - name: Discover Instances
-        id: discover
-        run: |
+        cd build
 
-          INSTANCE_IDS=$(aws autoscaling describe-auto-scaling-groups \
-            --auto-scaling-group-names "$ASG_NAME" \
-            --query 'AutoScalingGroups[0].Instances[?LifecycleState==`InService`].InstanceId' \
-            --output text)
+        zip -rq \
+          "../${{ steps.metadata.outputs.artifact }}" \
+          .
 
-          echo "Instances:"
-          echo "$INSTANCE_IDS"
+    ####################################################################
+    # Verify Deployment Package
+    ####################################################################
 
-          if [ -z "$INSTANCE_IDS" ]; then
-            echo "No running instances found."
-            exit 1
-          fi
+    - name: Verify Deployment Package
+      shell: bash
+      run: |
 
-          echo "instance_ids=$INSTANCE_IDS" >> $GITHUB_OUTPUT
+        unzip -l \
+        "${{ steps.metadata.outputs.artifact }}"
 
-      #########################################################################
-      # Send SSM Command
-      #########################################################################
+    ####################################################################
+    # Upload Workflow Artifact
+    ####################################################################
 
-      - name: Deploy via SSM
-        id: deploy
-        run: |
+    - name: Upload GitHub Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: deployment-package
+        path: ${{ steps.metadata.outputs.artifact }}
 
-          COMMAND_ID=$(aws ssm send-command \
-            --document-name AWS-RunShellScript \
-            --instance-ids ${{ steps.discover.outputs.instance_ids }} \
-            --comment "Employee Management Deployment" \
-            --parameters commands="[
-              \"export S3_BUCKET='${{ secrets.S3_BUCKET_NAME }}'\",
-              \"export ARTIFACT_NAME='${{ steps.metadata.outputs.artifact }}'\",
-              \"export GITHUB_SHA='${{ github.sha }}'\",
-              \"bash /opt/employee-app/scripts/bootstrap.sh\"
-            ]" \
-            --query "Command.CommandId" \
-            --output text)
+    ####################################################################
+    # Configure AWS Credentials
+    ####################################################################
 
-          echo "command_id=$COMMAND_ID" >> "$GITHUB_OUTPUT"
+    - name: Configure AWS Credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-region: ${{ env.AWS_REGION }}
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
 
-          echo "Command ID: $COMMAND_ID"
+    ####################################################################
+    # Upload Artifact To S3
+    ####################################################################
 
-      #########################################################################
-      # Wait
-      #########################################################################
+    - name: Upload Deployment Artifact
+      shell: bash
+      run: |
 
-      - name: Wait For Deployment
-        run: |
+        aws s3 cp \
+          "${{ steps.metadata.outputs.artifact }}" \
+          "s3://${S3_BUCKET}/${{ steps.metadata.outputs.artifact }}"
+
+        echo ""
+
+        echo "Uploaded to"
+
+        echo "s3://${S3_BUCKET}/${{ steps.metadata.outputs.artifact }}"
+    
+        ####################################################################
+    # Discover Running EC2 Instances
+    ####################################################################
+
+    - name: Discover ASG Instances
+      id: discover
+      shell: bash
+      run: |
+
+        echo "Discovering running instances in Auto Scaling Group..."
+
+        INSTANCE_IDS=$(aws autoscaling describe-auto-scaling-groups \
+          --auto-scaling-group-names "${ASG_NAME}" \
+          --query "AutoScalingGroups[0].Instances[?LifecycleState=='InService'].InstanceId" \
+          --output text)
+
+        if [ -z "$INSTANCE_IDS" ]; then
+          echo "No running instances found."
+          exit 1
+        fi
+
+        echo ""
+        echo "Instances Found:"
+        echo "$INSTANCE_IDS"
+
+        echo "instance_ids=$INSTANCE_IDS" >> "$GITHUB_OUTPUT"
+
+    ####################################################################
+    # Send SSM Deployment Command
+    ####################################################################
+
+    - name: Deploy Application
+      id: deploy
+      shell: bash
+      run: |
+
+        echo ""
+        echo "Starting deployment..."
+
+        COMMAND_ID=$(aws ssm send-command \
+          --document-name "AWS-RunShellScript" \
+          --comment "EmployeeManagement Deployment" \
+          --instance-ids ${{ steps.discover.outputs.instance_ids }} \
+          --parameters 'commands=[
+          "set -e",
+          "WORKDIR=$(mktemp -d)",
+          "cd $WORKDIR",
+          "echo Downloading deployment artifact...",
+          "aws s3 cp s3://'${S3_BUCKET}'/'${{ steps.metadata.outputs.artifact }}' deployment.zip",
+          "echo Extracting artifact...",
+          "unzip -oq deployment.zip",
+          "chmod +x scripts/*.sh",
+          "export GITHUB_SHA='${GITHUB_SHA}'",
+          "bash scripts/bootstrap.sh"
+          ]' \
+          --query "Command.CommandId" \
+          --output text)
+
+        echo ""
+
+        echo "Deployment Command ID"
+
+        echo "$COMMAND_ID"
+
+        echo "command_id=$COMMAND_ID" >> "$GITHUB_OUTPUT"
+
+    ####################################################################
+    # Display Command ID
+    ####################################################################
+
+    - name: Deployment Information
+      shell: bash
+      run: |
+
+        echo "SSM Command"
+
+        echo "${{ steps.deploy.outputs.command_id }}"
+
+        echo ""
+
+        echo "Target Instances"
+
+        echo "${{ steps.discover.outputs.instance_ids }}"
+
+
+        ####################################################################
+    # Wait For Deployment Completion
+    ####################################################################
+
+    - name: Wait For Deployment
+      shell: bash
+      run: |
+
+        set -e
+
+        COMMAND_ID="${{ steps.deploy.outputs.command_id }}"
+
+        echo "Waiting for deployment to finish..."
+
+        for INSTANCE_ID in ${{ steps.discover.outputs.instance_ids }}
+        do
+
+          echo ""
+          echo "----------------------------------------"
+          echo "Instance: $INSTANCE_ID"
+          echo "----------------------------------------"
 
           aws ssm wait command-executed \
-            --command-id "${{ steps.deploy.outputs.command_id }}" \
-            --instance-id $(echo "${{ steps.discover.outputs.instance_ids }}" | awk '{print $1}')
+            --command-id "$COMMAND_ID" \
+            --instance-id "$INSTANCE_ID"
 
-      #########################################################################
-      # Deployment Results
-      #########################################################################
+          echo "Deployment finished on $INSTANCE_ID"
 
-      - name: Show Deployment Results
-        run: |
+        done
 
-          aws ssm list-command-invocations \
-            --command-id "${{ steps.deploy.outputs.command_id }}" \
-            --details \
-            --output table
+    ####################################################################
+    # Collect Deployment Logs
+    ####################################################################
+
+    - name: Collect Deployment Logs
+      shell: bash
+      run: |
+
+        COMMAND_ID="${{ steps.deploy.outputs.command_id }}"
+
+        FAILED=0
+
+        for INSTANCE_ID in ${{ steps.discover.outputs.instance_ids }}
+        do
+
+          echo ""
+          echo "=================================================="
+          echo "INSTANCE : $INSTANCE_ID"
+          echo "=================================================="
+
+          STATUS=$(aws ssm get-command-invocation \
+            --command-id "$COMMAND_ID" \
+            --instance-id "$INSTANCE_ID" \
+            --query Status \
+            --output text)
+
+          RESPONSE=$(aws ssm get-command-invocation \
+            --command-id "$COMMAND_ID" \
+            --instance-id "$INSTANCE_ID")
+
+          echo ""
+          echo "STATUS"
+          echo "$STATUS"
+
+          echo ""
+          echo "STANDARD OUTPUT"
+          echo "$RESPONSE" | jq -r '.StandardOutputContent'
+
+          echo ""
+          echo "STANDARD ERROR"
+          echo "$RESPONSE" | jq -r '.StandardErrorContent'
+
+          echo ""
+
+          if [[ "$STATUS" != "Success" ]]
+          then
+              FAILED=1
+          fi
+
+        done
+
+        echo "FAILED=$FAILED" >> "$GITHUB_ENV"
+
+    ####################################################################
+    # Validate Deployment
+    ####################################################################
+
+    - name: Validate Deployment Status
+      shell: bash
+      run: |
+
+        if [[ "$FAILED" == "1" ]]
+        then
+
+            echo ""
+            echo "One or more instances failed deployment."
+
+            exit 1
+
+        fi
+
+        echo ""
+        echo "Deployment completed successfully on all instances."
+
+        ####################################################################
+    # Wait For Deployment Completion
+    ####################################################################
+
+    - name: Wait For Deployment
+      shell: bash
+      run: |
+
+        set +e
+
+        COMMAND_ID="${{ steps.deploy.outputs.command_id }}"
+
+        for INSTANCE_ID in ${{ steps.discover.outputs.instance_ids }}
+        do
+
+          echo ""
+          echo "========================================"
+          echo "Waiting for $INSTANCE_ID"
+          echo "========================================"
+
+          aws ssm wait command-executed \
+            --command-id "$COMMAND_ID" \
+            --instance-id "$INSTANCE_ID"
+
+        done
+
+    ####################################################################
+    # Collect Deployment Results
+    ####################################################################
+
+    - name: Collect Deployment Results
+      shell: bash
+      run: |
+
+        FAILED=0
+
+        COMMAND_ID="${{ steps.deploy.outputs.command_id }}"
+
+        for INSTANCE_ID in ${{ steps.discover.outputs.instance_ids }}
+        do
+
+          echo ""
+          echo "########################################################"
+          echo "INSTANCE : $INSTANCE_ID"
+          echo "########################################################"
+
+          STATUS=$(aws ssm get-command-invocation \
+            --command-id "$COMMAND_ID" \
+            --instance-id "$INSTANCE_ID" \
+            --query Status \
+            --output text)
+
+          RESPONSE_CODE=$(aws ssm get-command-invocation \
+            --command-id "$COMMAND_ID" \
+            --instance-id "$INSTANCE_ID" \
+            --query ResponseCode \
+            --output text)
+
+          echo ""
+          echo "Status : $STATUS"
+          echo "Response Code : $RESPONSE_CODE"
+
+          echo ""
+          echo "------------ STDOUT ------------"
+
+          aws ssm get-command-invocation \
+            --command-id "$COMMAND_ID" \
+            --instance-id "$INSTANCE_ID" \
+            --query StandardOutputContent \
+            --output text
+
+          echo ""
+          echo "------------ STDERR ------------"
+
+          aws ssm get-command-invocation \
+            --command-id "$COMMAND_ID" \
+            --instance-id "$INSTANCE_ID" \
+            --query StandardErrorContent \
+            --output text
+
+          echo ""
+
+          if [[ "$STATUS" != "Success" ]]
+          then
+              FAILED=1
+          fi
+
+        done
+
+        echo "FAILED=$FAILED" >> "$GITHUB_ENV"
+
+    ####################################################################
+    # Final Result
+    ####################################################################
+
+    - name: Deployment Summary
+      shell: bash
+      run: |
+
+        echo ""
+        echo "========================================"
+        echo "Deployment Summary"
+        echo "========================================"
+
+        echo "Application : ${APPLICATION_NAME}"
+        echo "Region      : ${AWS_REGION}"
+        echo "ASG         : ${ASG_NAME}"
+        echo "Artifact    : ${{ steps.metadata.outputs.artifact }}"
+        echo "Command ID  : ${{ steps.deploy.outputs.command_id }}"
+
+        echo ""
+
+        if [[ "$FAILED" == "1" ]]
+        then
+
+            echo "Deployment FAILED."
+
+            exit 1
+
+        fi
+
+        echo "Deployment SUCCESSFUL."
