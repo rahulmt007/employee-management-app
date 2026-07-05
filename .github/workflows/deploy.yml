@@ -9,7 +9,7 @@ permissions:
   contents: read
 
 env:
-  AWS_REGION: ap-south-1
+  AWS_REGION: us-east-1
   S3_BUCKET: rahulmt007-employee-management-artifacts
   ASG_NAME: capstone-asg
   APPLICATION_NAME: EmployeeManagement
