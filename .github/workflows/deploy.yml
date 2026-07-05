@@ -1,4 +1,4 @@
-name: Build Deployment Artifact
+name: Build & Deploy Employee Management
 
 on:
   push:
@@ -9,176 +9,111 @@ permissions:
   contents: read
 
 jobs:
-  build:
-    name: Build and Publish Deployment Artifact
+
+  deploy:
+
     runs-on: ubuntu-latest
 
+    env:
+      ASG_NAME: capstone-asg
+
     steps:
-      ####################################################################
+
+      #########################################################################
       # Checkout
-      ####################################################################
+      #########################################################################
 
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      ####################################################################
+      #########################################################################
       # Validate Repository
-      ####################################################################
+      #########################################################################
 
-      - name: Validate Repository Structure
-        shell: bash
+      - name: Validate Repository
         run: |
           set -e
 
-          echo "Repository Root:"
-          pwd
-
-          echo ""
-          echo "Repository Contents:"
-          ls -la
-
-          echo ""
-          echo "Application:"
-          ls -la app
-
-          echo ""
-          echo "Scripts:"
-          ls -la scripts
-
-          echo ""
-          echo "Checking required files..."
+          test -d app
+          test -d scripts
 
           test -f app/index.php
           test -f app/healthcheck.php
-
-          test -f scripts/deploy.sh
-          test -f scripts/common.sh
-          test -f scripts/backup.sh
-          test -f scripts/rollback.sh
-          test -f scripts/verify_deployment.sh
-          test -f scripts/prune_releases.sh
-
           test -f app/sql/database.sql
 
-          echo ""
+          test -f scripts/bootstrap.sh
+          test -f scripts/deploy.sh
+
           echo "Repository validation passed."
 
-      ####################################################################
+      #########################################################################
       # Build Metadata
-      ####################################################################
+      #########################################################################
 
       - name: Generate Build Metadata
         id: metadata
-        shell: bash
         run: |
           TIMESTAMP=$(date +%Y%m%d-%H%M%S)
           SHORT_SHA=$(git rev-parse --short HEAD)
 
           ARTIFACT="employee-management-${TIMESTAMP}-${SHORT_SHA}.zip"
 
-          echo "timestamp=$TIMESTAMP" >> "$GITHUB_OUTPUT"
-          echo "sha=$SHORT_SHA" >> "$GITHUB_OUTPUT"
           echo "artifact=$ARTIFACT" >> "$GITHUB_OUTPUT"
 
-          echo "Artifact: $ARTIFACT"
+      #########################################################################
+      # Build Artifact
+      #########################################################################
 
-      ####################################################################
-      # Assemble Deployment Package
-      ####################################################################
-
-      - name: Assemble Deployment Package
-        shell: bash
+      - name: Prepare Build Directory
         run: |
-          set -e
+          mkdir build
 
-          echo "Creating build workspace..."
+          cp -r app build/
+          cp -r scripts build/
 
-          rm -rf build
-
-          mkdir -p build/app
-          mkdir -p build/scripts
-
-          echo "Copying application..."
-
-          cp -R app/. build/app/
-
-          echo "Copying deployment scripts..."
-
-          cp -R scripts/. build/scripts/
-
-          echo "Generating VERSION..."
-
-          cat > build/VERSION <<EOF
-          Application : Employee Management
-          Build Time  : ${{ steps.metadata.outputs.timestamp }}
-          Commit      : ${{ steps.metadata.outputs.sha }}
-          Branch      : ${{ github.ref_name }}
-          Repository  : ${{ github.repository }}
-          EOF
-
-          echo "Generating manifest..."
+          echo "${{ github.sha }}" > build/VERSION
 
           cat > build/manifest.json <<EOF
           {
-            "application": "employee-management",
-            "artifact": "${{ steps.metadata.outputs.artifact }}",
-            "commit": "${{ steps.metadata.outputs.sha }}",
-            "branch": "${{ github.ref_name }}",
-            "repository": "${{ github.repository }}",
-            "timestamp": "${{ steps.metadata.outputs.timestamp }}"
+            "commit":"${{ github.sha }}",
+            "branch":"${{ github.ref_name }}",
+            "build":"${{ github.run_number }}"
           }
           EOF
 
-      ####################################################################
-      # Show Build Layout
-      ####################################################################
+      #########################################################################
+      # Package
+      #########################################################################
 
-      - name: Display Build Directory
-        shell: bash
-        run: |
-          echo "Build directory:"
-          find build
-
-      ####################################################################
-      # Build ZIP
-      ####################################################################
-
-      - name: Build Deployment Artifact
-        shell: bash
+      - name: Package Deployment Artifact
         run: |
           cd build
 
-          zip -r "../${{ steps.metadata.outputs.artifact }}" .
+          zip -r \
+            "../${{ steps.metadata.outputs.artifact }}" \
+            .
 
-      ####################################################################
+      #########################################################################
       # Verify ZIP
-      ####################################################################
+      #########################################################################
 
-      - name: Verify Deployment Artifact
-        shell: bash
+      - name: Verify Artifact
         run: |
-          echo "Artifact Details"
-
-          ls -lh "${{ steps.metadata.outputs.artifact }}"
-
-          echo ""
-
           unzip -l "${{ steps.metadata.outputs.artifact }}"
 
-      ####################################################################
-      # Upload to GitHub Artifacts
-      ####################################################################
+      #########################################################################
+      # Upload GitHub Artifact
+      #########################################################################
 
       - name: Upload Workflow Artifact
         uses: actions/upload-artifact@v4
         with:
           name: deployment-package
           path: ${{ steps.metadata.outputs.artifact }}
-          if-no-files-found: error
 
-      ####################################################################
-      # Configure AWS
-      ####################################################################
+      #########################################################################
+      # AWS Login
+      #########################################################################
 
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -187,44 +122,83 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ secrets.AWS_REGION }}
 
-      ####################################################################
+      #########################################################################
       # Upload to S3
-      ####################################################################
+      #########################################################################
 
       - name: Upload Artifact to S3
-        shell: bash
         run: |
           aws s3 cp \
             "${{ steps.metadata.outputs.artifact }}" \
             "s3://${{ secrets.S3_BUCKET_NAME }}/${{ steps.metadata.outputs.artifact }}"
 
-      ####################################################################
-      # Verify Upload
-      ####################################################################
+      #########################################################################
+      # Discover ASG Instances
+      #########################################################################
 
-      - name: Verify S3 Upload
-        shell: bash
+      - name: Discover Instances
+        id: discover
         run: |
-          aws s3 ls \
-            "s3://${{ secrets.S3_BUCKET_NAME }}/${{ steps.metadata.outputs.artifact }}"
 
-      ####################################################################
-      # Summary
-      ####################################################################
+          INSTANCE_IDS=$(aws autoscaling describe-auto-scaling-groups \
+            --auto-scaling-group-names "$ASG_NAME" \
+            --query 'AutoScalingGroups[0].Instances[?LifecycleState==`InService`].InstanceId' \
+            --output text)
 
-      - name: Build Summary
-        shell: bash
+          echo "Instances:"
+          echo "$INSTANCE_IDS"
+
+          if [ -z "$INSTANCE_IDS" ]; then
+            echo "No running instances found."
+            exit 1
+          fi
+
+          echo "instance_ids=$INSTANCE_IDS" >> $GITHUB_OUTPUT
+
+      #########################################################################
+      # Send SSM Command
+      #########################################################################
+
+      - name: Deploy via SSM
+        id: deploy
         run: |
-          echo ""
-          echo "======================================"
-          echo " Build Completed Successfully"
-          echo "======================================"
-          echo ""
-          echo "Artifact:"
-          echo "${{ steps.metadata.outputs.artifact }}"
-          echo ""
-          echo "Repository:"
-          echo "${{ github.repository }}"
-          echo ""
-          echo "Branch:"
-          echo "${{ github.ref_name }}"
+
+          COMMAND_ID=$(aws ssm send-command \
+            --document-name AWS-RunShellScript \
+            --instance-ids ${{ steps.discover.outputs.instance_ids }} \
+            --comment "Employee Management Deployment" \
+            --parameters commands="[
+              \"export S3_BUCKET='${{ secrets.S3_BUCKET_NAME }}'\",
+              \"export ARTIFACT_NAME='${{ steps.metadata.outputs.artifact }}'\",
+              \"export GITHUB_SHA='${{ github.sha }}'\",
+              \"bash /opt/employee-app/scripts/bootstrap.sh\"
+            ]" \
+            --query "Command.CommandId" \
+            --output text)
+
+          echo "command_id=$COMMAND_ID" >> "$GITHUB_OUTPUT"
+
+          echo "Command ID: $COMMAND_ID"
+
+      #########################################################################
+      # Wait
+      #########################################################################
+
+      - name: Wait For Deployment
+        run: |
+
+          aws ssm wait command-executed \
+            --command-id "${{ steps.deploy.outputs.command_id }}" \
+            --instance-id $(echo "${{ steps.discover.outputs.instance_ids }}" | awk '{print $1}')
+
+      #########################################################################
+      # Deployment Results
+      #########################################################################
+
+      - name: Show Deployment Results
+        run: |
+
+          aws ssm list-command-invocations \
+            --command-id "${{ steps.deploy.outputs.command_id }}" \
+            --details \
+            --output table
