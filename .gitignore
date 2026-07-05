@@ -1,0 +1,5 @@
+# Build output
+build/
+
+# Deployment artifacts
+*.zip
