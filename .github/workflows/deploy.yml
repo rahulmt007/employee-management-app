@@ -19,12 +19,34 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Validate Repository Structure
-        run: |
-          test -f index.php
-          test -f healthcheck.php
-          test -d scripts
-          test -d assets
-          test -d sql
+  run: |
+    echo "Current directory:"
+    pwd
+
+    echo ""
+    echo "Repository contents:"
+    ls -la
+
+    echo ""
+    echo "Scripts:"
+    ls -la scripts
+
+    echo ""
+    echo "SQL:"
+    ls -la sql
+
+    echo ""
+    echo "Checking required files..."
+
+    test -f index.php
+    test -f healthcheck.php
+    test -f scripts/deploy.sh
+    test -f scripts/common.sh
+    test -f scripts/backup.sh
+    test -f sql/database.sql
+
+    echo ""
+    echo "Repository validation passed."
 
       - name: Generate Build Metadata
         id: metadata
