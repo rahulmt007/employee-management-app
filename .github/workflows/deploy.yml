@@ -10,66 +10,81 @@ permissions:
 
 jobs:
   build:
-
+    name: Build and Upload Artifact
     runs-on: ubuntu-latest
 
     steps:
-
       - name: Checkout Repository
         uses: actions/checkout@v4
 
       - name: Validate Repository Structure
-  run: |
-    echo "Current directory:"
-    pwd
+        shell: bash
+        run: |
+          set -e
 
-    echo ""
-    echo "Repository contents:"
-    ls -la
+          echo "Current directory:"
+          pwd
 
-    echo ""
-    echo "Scripts:"
-    ls -la scripts
+          echo ""
+          echo "Repository contents:"
+          ls -la
 
-    echo ""
-    echo "SQL:"
-    ls -la sql
+          echo ""
+          echo "Scripts:"
+          ls -la scripts
 
-    echo ""
-    echo "Checking required files..."
+          echo ""
+          echo "SQL:"
+          ls -la sql
 
-    test -f index.php
-    test -f healthcheck.php
-    test -f scripts/deploy.sh
-    test -f scripts/common.sh
-    test -f scripts/backup.sh
-    test -f sql/database.sql
+          echo ""
+          echo "Checking required files..."
 
-    echo ""
-    echo "Repository validation passed."
+          test -f index.php
+          test -f healthcheck.php
+          test -f scripts/deploy.sh
+          test -f scripts/common.sh
+          test -f scripts/backup.sh
+          test -f scripts/rollback.sh
+          test -f scripts/verify_deployment.sh
+          test -f scripts/prune_releases.sh
+          test -f sql/database.sql
+
+          echo ""
+          echo "Repository validation passed."
 
       - name: Generate Build Metadata
         id: metadata
+        shell: bash
         run: |
           TIMESTAMP=$(date +%Y%m%d-%H%M%S)
           SHORT_SHA=$(git rev-parse --short HEAD)
 
-          echo "timestamp=$TIMESTAMP" >> $GITHUB_OUTPUT
-          echo "sha=$SHORT_SHA" >> $GITHUB_OUTPUT
-          echo "artifact=employee-management-${TIMESTAMP}-${SHORT_SHA}.zip" >> $GITHUB_OUTPUT
+          ARTIFACT_NAME="employee-management-${TIMESTAMP}-${SHORT_SHA}.zip"
+
+          echo "timestamp=$TIMESTAMP" >> "$GITHUB_OUTPUT"
+          echo "sha=$SHORT_SHA" >> "$GITHUB_OUTPUT"
+          echo "artifact=$ARTIFACT_NAME" >> "$GITHUB_OUTPUT"
+
+          echo "Artifact Name: $ARTIFACT_NAME"
 
       - name: Build Deployment Artifact
+        shell: bash
         run: |
-          zip -r \
-          "${{ steps.metadata.outputs.artifact }}" \
-          . \
-          -x ".git/*" \
-             ".github/*" \
-             "docs/*" \
-             "screenshots/*"
+          zip -r "${{ steps.metadata.outputs.artifact }}" . \
+            -x ".git/*" \
+               ".github/*" \
+               "docs/*" \
+               "screenshots/*"
 
-      - name: Verify Artifact
+      - name: Verify Deployment Artifact
+        shell: bash
         run: |
+          echo "Artifact details:"
+          ls -lh "${{ steps.metadata.outputs.artifact }}"
+
+          echo ""
+          echo "Archive contents:"
           unzip -l "${{ steps.metadata.outputs.artifact }}"
 
       - name: Upload Workflow Artifact
@@ -77,6 +92,7 @@ jobs:
         with:
           name: deployment-package
           path: ${{ steps.metadata.outputs.artifact }}
+          if-no-files-found: error
 
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -86,12 +102,20 @@ jobs:
           aws-region: ${{ secrets.AWS_REGION }}
 
       - name: Upload Artifact to S3
+        shell: bash
         run: |
           aws s3 cp \
             "${{ steps.metadata.outputs.artifact }}" \
             "s3://${{ secrets.S3_BUCKET_NAME }}/${{ steps.metadata.outputs.artifact }}"
 
-      - name: Verify Upload
+      - name: Verify S3 Upload
+        shell: bash
         run: |
           aws s3 ls \
-            "s3://${{ secrets.S3_BUCKET_NAME }}/${{ steps.metadata.outputs.artifact }}"  
+            "s3://${{ secrets.S3_BUCKET_NAME }}/${{ steps.metadata.outputs.artifact }}"
+
+      - name: Build Summary
+        shell: bash
+        run: |
+          echo "Build completed successfully."
+          echo "Artifact: ${{ steps.metadata.outputs.artifact }}"
