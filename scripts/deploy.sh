@@ -1,62 +1,136 @@
 #!/bin/bash
 
+###############################################################################
+# Employee Management Deployment Framework v2
+#
+# Deploy Application
+###############################################################################
+
 set -Eeuo pipefail
 
+###############################################################################
+# Load Common Functions
+###############################################################################
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "$SCRIPT_DIR/common.sh"
 
-echo_log "========== Deployment Started =========="
+source "${SCRIPT_DIR}/common.sh"
 
-# Verify extracted artifact exists
-if [[ ! -f "$ARTIFACT_DIR/index.php" ]]; then
-    fail "Deployment artifact not found at $ARTIFACT_DIR"
-fi
+###############################################################################
+# Validate Deployment Input
+###############################################################################
 
-echo_log "Creating backup..."
+[[ -d "${ARTIFACT_DIR}" ]] || fatal "Artifact directory does not exist."
 
-bash "$SCRIPT_DIR/backup.sh"
+[[ -f "${ARTIFACT_DIR}/index.php" ]] || fatal "index.php not found."
 
-echo_log "Creating release directory..."
+###############################################################################
+# Begin Deployment
+###############################################################################
 
-mkdir -p "$RELEASE_DIR"
+info "Creating release directory..."
 
-echo_log "Copying application files..."
+run mkdir -p "${RELEASE_DIR}"
 
-rsync -a --delete \
-    "$ARTIFACT_DIR"/ \
-    "$RELEASE_DIR"/
+###############################################################################
+# Copy Application
+###############################################################################
 
-echo_log "Updating current release..."
+info "Copying application..."
 
-ln -sfn "$RELEASE_DIR" "$CURRENT_LINK"
+run rsync \
+    -a \
+    --delete \
+    "${ARTIFACT_DIR}/" \
+    "${RELEASE_DIR}/"
 
-echo_log "Setting permissions..."
+###############################################################################
+# Permissions
+###############################################################################
 
-sudo chown -R apache:apache "$RELEASE_DIR"
+info "Applying permissions..."
 
-find "$RELEASE_DIR" -type d -exec chmod 755 {} \;
+run find "${RELEASE_DIR}" -type d -exec chmod 755 {} \;
 
-find "$RELEASE_DIR" -type f -exec chmod 644 {} \;
+run find "${RELEASE_DIR}" -type f -exec chmod 644 {} \;
 
-echo_log "Restarting Apache..."
+run chmod +x "${SCRIPT_DIR}"/*.sh
 
-sudo systemctl restart httpd
+###############################################################################
+# Backup Current Release
+###############################################################################
 
-echo_log "Running deployment verification..."
+if [[ -L "${CURRENT_LINK}" ]]; then
 
-if bash "$SCRIPT_DIR/verify_deployment.sh"
-then
-    echo_log "Deployment verification passed."
+    info "Backing up current release..."
+
+    bash "${SCRIPT_DIR}/backup.sh"
+
 else
-    echo_log "Deployment verification failed." "ERROR"
 
-    bash "$SCRIPT_DIR/rollback.sh"
+    warn "No current deployment found. Skipping backup."
 
-    fail "Rollback completed."
 fi
 
-echo_log "Pruning old releases..."
+###############################################################################
+# Switch Current Release
+###############################################################################
 
-bash "$SCRIPT_DIR/prune_releases.sh"
+info "Updating current symlink..."
 
-echo_log "========== Deployment Finished =========="
+run ln -sfn "${RELEASE_DIR}" "${CURRENT_LINK}"
+
+###############################################################################
+# Apache Restart
+###############################################################################
+
+info "Restarting Apache..."
+
+run systemctl restart httpd
+
+###############################################################################
+# Apache Status
+###############################################################################
+
+run systemctl is-active --quiet httpd || {
+
+    error "Apache failed to start."
+
+    bash "${SCRIPT_DIR}/rollback.sh"
+
+    exit 1
+}
+
+###############################################################################
+# Verify Deployment
+###############################################################################
+
+info "Running deployment verification..."
+
+if ! bash "${SCRIPT_DIR}/verify_deployment.sh"
+then
+
+    error "Deployment verification failed."
+
+    bash "${SCRIPT_DIR}/rollback.sh"
+
+    exit 1
+
+fi
+
+###############################################################################
+# Cleanup Old Releases
+###############################################################################
+
+info "Pruning old releases..."
+
+bash "${SCRIPT_DIR}/prune_releases.sh"
+
+###############################################################################
+# Success
+###############################################################################
+
+info "==============================================="
+info "Deployment completed successfully."
+info "Release : ${RELEASE_NAME}"
+info "==============================================="

@@ -1,0 +1,10 @@
+CREATE DATABASE IF NOT EXISTS employeedb;
+
+USE employeedb;
+
+CREATE TABLE employees (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    name VARCHAR(100),
+    address VARCHAR(200),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);

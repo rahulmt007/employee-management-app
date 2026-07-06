@@ -1,28 +1,41 @@
 #!/bin/bash
 
+###############################################################################
+# Rollback Deployment
+###############################################################################
+
 set -Eeuo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "$SCRIPT_DIR/common.sh"
 
-echo_log "Starting rollback..."
+source "${SCRIPT_DIR}/common.sh"
 
-if [[ ! -f "$BACKUP_DIR/previous_release" ]]; then
-    fail "No rollback information available."
+info "Starting rollback..."
+
+PREVIOUS_RELEASE=$(
+find "${RELEASES_DIR}" \
+    -mindepth 1 \
+    -maxdepth 1 \
+    -type d \
+    | sort \
+    | tail -2 \
+    | head -1
+)
+
+if [[ -z "${PREVIOUS_RELEASE}" ]]; then
+
+    fatal "No previous release available."
+
 fi
 
-PREVIOUS_RELEASE=$(cat "$BACKUP_DIR/previous_release")
+info "Rolling back to"
 
-if [[ ! -d "$PREVIOUS_RELEASE" ]]; then
-    fail "Previous release does not exist."
-fi
+info "${PREVIOUS_RELEASE}"
 
-ln -sfn "$PREVIOUS_RELEASE" "$CURRENT_LINK"
+run ln -sfn "${PREVIOUS_RELEASE}" "${CURRENT_LINK}"
 
-sudo systemctl restart httpd
+run systemctl restart httpd
 
-echo_log "Rollback completed."
+run systemctl is-active --quiet httpd
 
-bash "$SCRIPT_DIR/verify_deployment.sh"
-
-echo_log "Rollback verified successfully."
+info "Rollback completed successfully."

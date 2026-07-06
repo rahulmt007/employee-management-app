@@ -1,26 +1,37 @@
 #!/bin/bash
 
+###############################################################################
+# Verify Deployment
+###############################################################################
+
 set -Eeuo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "$SCRIPT_DIR/common.sh"
 
-echo_log "Performing deployment verification..."
+source "${SCRIPT_DIR}/common.sh"
 
-HTTP_CODE=$(curl \
+URL="http://localhost/healthcheck.php"
+
+info "Running deployment verification..."
+
+HTTP_CODE=$(
+curl \
     --silent \
     --output /dev/null \
     --write-out "%{http_code}" \
-    http://localhost/healthcheck.php)
+    "${URL}"
+)
 
-if [[ "$HTTP_CODE" != "200" ]]; then
-    fail "Health check returned HTTP $HTTP_CODE"
+if [[ "${HTTP_CODE}" != "200" ]]; then
+
+    error "Health check failed."
+
+    error "HTTP Status: ${HTTP_CODE}"
+
+    exit 1
+
 fi
 
-BODY=$(curl --silent http://localhost/healthcheck.php)
+info "Health check passed."
 
-if [[ "$BODY" != "OK" ]]; then
-    fail "Unexpected health check response: $BODY"
-fi
-
-echo_log "Health check passed."
+exit 0

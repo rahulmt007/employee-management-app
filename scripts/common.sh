@@ -1,46 +1,140 @@
 #!/bin/bash
 
+###############################################################################
+# Employee Management Deployment Framework v2
+#
+# Common configuration and utility functions
+###############################################################################
+
 set -Eeuo pipefail
 
-APP_ROOT="/opt/employee-app"
+###############################################################################
+# Application Information
+###############################################################################
 
-RELEASES_DIR="$APP_ROOT/releases"
-CURRENT_LINK="$APP_ROOT/current"
-WEB_ROOT="$CURRENT_LINK"
+APP_NAME="employee-app"
 
-BACKUP_DIR="$APP_ROOT/backups"
-LOG_DIR="$APP_ROOT/logs"
+###############################################################################
+# Deployment Paths
+###############################################################################
 
-WORKSPACE="/tmp/employee-deployment"
-ARTIFACT_DIR="$WORKSPACE/extracted"
+DEPLOY_ROOT="/opt/${APP_NAME}"
 
-DEPLOYMENT_ID="${DEPLOYMENT_ID:-$(date +%Y%m%d-%H%M%S)}"
-GIT_SHA="${GIT_SHA:-manual}"
+RELEASES_DIR="${DEPLOY_ROOT}/releases"
 
-RELEASE_NAME="${DEPLOYMENT_ID}-${GIT_SHA:0:7}"
-RELEASE_DIR="$RELEASES_DIR/$RELEASE_NAME"
+CURRENT_LINK="${DEPLOY_ROOT}/current"
 
-LOG_FILE="$LOG_DIR/deployment.log"
+BACKUP_DIR="${DEPLOY_ROOT}/backups"
 
-ensure_directory() {
-    mkdir -p "$1"
+LOG_DIR="${DEPLOY_ROOT}/logs"
+
+###############################################################################
+# Deployment Inputs
+###############################################################################
+
+: "${ARTIFACT_DIR:?ARTIFACT_DIR is not set}"
+
+###############################################################################
+# Release Information
+###############################################################################
+
+DEPLOYMENT_ID="${GITHUB_SHA:-manual}"
+
+TIMESTAMP="$(date +%Y%m%d-%H%M%S)"
+
+RELEASE_NAME="${TIMESTAMP}-${DEPLOYMENT_ID}"
+
+RELEASE_DIR="${RELEASES_DIR}/${RELEASE_NAME}"
+
+###############################################################################
+# Logging
+###############################################################################
+
+mkdir -p "$LOG_DIR"
+
+LOG_FILE="${LOG_DIR}/deploy-${TIMESTAMP}.log"
+
+log() {
+
+    local LEVEL="$1"
+    shift
+
+    local MESSAGE="$*"
+
+    printf "[%s] %-5s %s\n" \
+        "$(date '+%Y-%m-%d %H:%M:%S')" \
+        "$LEVEL" \
+        "$MESSAGE" | tee -a "$LOG_FILE"
 }
 
-ensure_directory "$RELEASES_DIR"
-ensure_directory "$BACKUP_DIR"
-ensure_directory "$LOG_DIR"
-ensure_directory "$WORKSPACE"
+info() {
 
-echo_log() {
-    local level="${2:-INFO}"
-    echo "[$(date '+%F %T')] [$level] $1" | tee -a "$LOG_FILE"
+    log INFO "$@"
 }
 
-command_exists() {
-    command -v "$1" >/dev/null 2>&1
+warn() {
+
+    log WARN "$@"
 }
 
-fail() {
-    echo_log "$1" "ERROR"
+error() {
+
+    log ERROR "$@"
+}
+
+fatal() {
+
+    error "$@"
     exit 1
 }
+
+###############################################################################
+# Execute Command
+###############################################################################
+
+run() {
+
+    info "$*"
+
+    "$@"
+}
+
+###############################################################################
+# Validation
+###############################################################################
+
+require_command() {
+
+    command -v "$1" >/dev/null 2>&1 || \
+        fatal "Required command not found: $1"
+}
+
+###############################################################################
+# Ensure Required Directories Exist
+###############################################################################
+
+mkdir -p "$DEPLOY_ROOT"
+mkdir -p "$RELEASES_DIR"
+mkdir -p "$BACKUP_DIR"
+mkdir -p "$LOG_DIR"
+
+###############################################################################
+# Validate Required Tools
+###############################################################################
+
+require_command rsync
+require_command find
+require_command ln
+require_command chmod
+require_command chown
+require_command systemctl
+
+###############################################################################
+# Banner
+###############################################################################
+
+info "==============================================="
+info "Employee Management Deployment Framework"
+info "Release : $RELEASE_NAME"
+info "Artifact: $ARTIFACT_DIR"
+info "==============================================="

@@ -1,35 +1,45 @@
 #!/bin/bash
 
+###############################################################################
+# Remove Old Releases
+###############################################################################
+
 set -Eeuo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "$SCRIPT_DIR/common.sh"
+
+source "${SCRIPT_DIR}/common.sh"
 
 KEEP_RELEASES=5
 
-echo_log "Pruning old releases..."
+info "Removing old releases..."
 
-cd "$RELEASES_DIR"
-
-COUNT=$(find . -maxdepth 1 -mindepth 1 -type d | wc -l)
-
-if [[ "$COUNT" -le "$KEEP_RELEASES" ]]; then
-    echo_log "No releases need pruning."
-    exit 0
-fi
-
-find . \
-    -maxdepth 1 \
+OLD_RELEASES=$(
+find "${RELEASES_DIR}" \
     -mindepth 1 \
+    -maxdepth 1 \
     -type d \
     | sort \
-    | head -n -"${KEEP_RELEASES}" \
-    | while read -r release
+    | head -n -"${KEEP_RELEASES}" 2>/dev/null || true
+)
+
+if [[ -z "${OLD_RELEASES}" ]]; then
+
+    info "Nothing to prune."
+
+    exit 0
+
+fi
+
+while read -r RELEASE
 do
-    echo_log "Removing $release"
 
-    rm -rf "$RELEASES_DIR/${release#./}"
+    [[ -z "$RELEASE" ]] && continue
 
-done
+    info "Removing ${RELEASE}"
 
-echo_log "Release pruning completed."
+    run rm -rf "${RELEASE}"
+
+done <<< "${OLD_RELEASES}"
+
+info "Release pruning complete."
