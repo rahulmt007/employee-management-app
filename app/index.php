@@ -46,6 +46,29 @@ exit();
 
 }
 
+// Update employee
+if(isset($_POST['update'])){
+
+$id=(int)$_POST['id'];
+
+$name =
+$conn->real_escape_string($_POST['name']);
+
+$address =
+$conn->real_escape_string($_POST['address']);
+
+$conn->query("
+UPDATE employees
+SET name='$name', address='$address'
+WHERE id=$id
+");
+
+header("Location:index.php");
+
+exit();
+
+}
+
 // Delete employee
 if(isset($_GET['delete'])){
 
@@ -58,6 +81,28 @@ $conn->query(
 header("Location:index.php");
 
 exit();
+
+}
+
+// Edit employee
+$editEmployee=null;
+
+if(isset($_GET['edit'])){
+
+$editId=(int)$_GET['edit'];
+
+$editResult=$conn->query("
+SELECT *
+FROM employees
+WHERE id=$editId
+LIMIT 1
+");
+
+if($editResult && $editResult->num_rows > 0){
+
+$editEmployee=$editResult->fetch_assoc();
+
+}
 
 }
 
@@ -126,10 +171,17 @@ $total=$countResult
 
             <div class="card">
                 <div class="card-header">
-                    <h2>Add Employee</h2>
+                    <h2><?= $editEmployee ? "Edit Employee" : "Add Employee" ?></h2>
                 </div>
 
                 <form method="POST" class="form">
+                    <?php if($editEmployee): ?>
+                        <input
+                            type="hidden"
+                            name="id"
+                            value="<?= $editEmployee['id'] ?>">
+                    <?php endif; ?>
+
                     <div class="form-group">
                         <label for="name">Employee Name</label>
                         <input
@@ -137,6 +189,7 @@ $total=$countResult
                             type="text"
                             name="name"
                             placeholder="Enter employee name"
+                            value="<?= $editEmployee ? htmlspecialchars($editEmployee['name']) : "" ?>"
                             required>
                     </div>
 
@@ -147,12 +200,25 @@ $total=$countResult
                             type="text"
                             name="address"
                             placeholder="Enter employee address"
+                            value="<?= $editEmployee ? htmlspecialchars($editEmployee['address']) : "" ?>"
                             required>
                     </div>
 
-                    <button class="btn btn-primary" name="add">
-                        Add Employee
-                    </button>
+                    <div class="button-row">
+                        <?php if($editEmployee): ?>
+                            <button class="btn btn-primary" name="update">
+                                Update Employee
+                            </button>
+
+                            <a class="btn btn-light" href="index.php">
+                                Cancel
+                            </a>
+                        <?php else: ?>
+                            <button class="btn btn-primary" name="add">
+                                Add Employee
+                            </button>
+                        <?php endif; ?>
+                    </div>
                 </form>
             </div>
 
@@ -227,11 +293,19 @@ $total=$countResult
                                     </td>
 
                                     <td>
-                                        <a
-                                            class="delete-link"
-                                            href="?delete=<?= $row['id'] ?>">
-                                            Delete
-                                        </a>
+                                        <div class="action-row">
+                                            <a
+                                                class="edit-link"
+                                                href="?edit=<?= $row['id'] ?>">
+                                                Edit
+                                            </a>
+
+                                            <a
+                                                class="delete-link"
+                                                href="?delete=<?= $row['id'] ?>">
+                                                Delete
+                                            </a>
+                                        </div>
                                     </td>
                                 </tr>
                             <?php endwhile; ?>
