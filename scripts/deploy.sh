@@ -1,136 +1,108 @@
 #!/bin/bash
-
-###############################################################################
-# Employee Management Deployment Framework v2
-#
-# Deploy Application
-###############################################################################
-
 set -Eeuo pipefail
 
-###############################################################################
-# Load Common Functions
-###############################################################################
-
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-
 source "${SCRIPT_DIR}/common.sh"
 
-###############################################################################
-# Validate Deployment Input
-###############################################################################
+APACHE_ENV_FILE="/etc/httpd/conf.d/employee-app-env.conf"
 
-[[ -d "${ARTIFACT_DIR}" ]] || fatal "Artifact directory does not exist."
+DB_HOST="${DB_HOST:?DB_HOST is not set}"
+DB_USER="${DB_USER:?DB_USER is not set}"
+DB_PASS="${DB_PASS:?DB_PASS is not set}"
+DB_NAME="${DB_NAME:?DB_NAME is not set}"
 
-[[ -f "${ARTIFACT_DIR}/index.php" ]] || fatal "index.php not found."
+APACHE_RESTART_REQUIRED=0
 
-###############################################################################
-# Begin Deployment
-###############################################################################
+write_apache_env_config() {
+    info "Configuring Apache application environment..."
 
-info "Creating release directory..."
+    TMP_FILE="$(mktemp)"
 
-run mkdir -p "${RELEASE_DIR}"
+    cat > "$TMP_FILE" <<EOF
+SetEnv DB_HOST ${DB_HOST}
+SetEnv DB_USER ${DB_USER}
+SetEnv DB_PASS ${DB_PASS}
+SetEnv DB_NAME ${DB_NAME}
+EOF
 
-###############################################################################
-# Copy Application
-###############################################################################
+    if [[ ! -f "$APACHE_ENV_FILE" ]] || ! cmp -s "$TMP_FILE" "$APACHE_ENV_FILE"; then
+        run cp "$TMP_FILE" "$APACHE_ENV_FILE"
+        APACHE_RESTART_REQUIRED=1
+        info "Apache environment configuration updated."
+    else
+        info "Apache environment configuration already up to date."
+    fi
 
-info "Copying application..."
-
-run rsync \
-    -a \
-    --delete \
-    "${ARTIFACT_DIR}/" \
-    "${RELEASE_DIR}/"
-
-###############################################################################
-# Permissions
-###############################################################################
-
-info "Applying permissions..."
-
-run find "${RELEASE_DIR}" -type d -exec chmod 755 {} \;
-
-run find "${RELEASE_DIR}" -type f -exec chmod 644 {} \;
-
-run chmod +x "${SCRIPT_DIR}"/*.sh
-
-###############################################################################
-# Backup Current Release
-###############################################################################
-
-if [[ -L "${CURRENT_LINK}" ]]; then
-
-    info "Backing up current release..."
-
-    bash "${SCRIPT_DIR}/backup.sh"
-
-else
-
-    warn "No current deployment found. Skipping backup."
-
-fi
-
-###############################################################################
-# Switch Current Release
-###############################################################################
-
-info "Updating current symlink..."
-
-run ln -sfn "${RELEASE_DIR}" "${CURRENT_LINK}"
-
-###############################################################################
-# Apache Restart
-###############################################################################
-
-info "Restarting Apache..."
-
-run systemctl restart httpd
-
-###############################################################################
-# Apache Status
-###############################################################################
-
-run systemctl is-active --quiet httpd || {
-
-    error "Apache failed to start."
-
-    bash "${SCRIPT_DIR}/rollback.sh"
-
-    exit 1
+    rm -f "$TMP_FILE"
 }
 
-###############################################################################
-# Verify Deployment
-###############################################################################
+verify_database_connection() {
+    info "Verifying database connection..."
 
-info "Running deployment verification..."
+    php -r '
+        $conn = new mysqli(
+            getenv("DB_HOST"),
+            getenv("DB_USER"),
+            getenv("DB_PASS"),
+            getenv("DB_NAME")
+        );
 
-if ! bash "${SCRIPT_DIR}/verify_deployment.sh"
-then
+        if ($conn->connect_error) {
+            fwrite(STDERR, "Database connection failed\n");
+            exit(1);
+        }
 
-    error "Deployment verification failed."
+        echo "Database connection successful\n";
+        $conn->close();
+    '
+}
 
-    bash "${SCRIPT_DIR}/rollback.sh"
+[[ -d "${ARTIFACT_DIR}" ]] || fatal "Artifact directory does not exist."
+[[ -f "${ARTIFACT_DIR}/index.php" ]] || fatal "index.php not found."
 
-    exit 1
+write_apache_env_config
 
+export DB_HOST DB_USER DB_PASS DB_NAME
+verify_database_connection
+
+info "Creating release directory..."
+run mkdir -p "${RELEASE_DIR}"
+
+info "Copying application..."
+run rsync -a --delete "${ARTIFACT_DIR}/" "${RELEASE_DIR}/"
+
+info "Applying permissions..."
+run find "${RELEASE_DIR}" -type d -exec chmod 755 {} \;
+run find "${RELEASE_DIR}" -type f -exec chmod 644 {} \;
+
+if [[ -L "${CURRENT_LINK}" ]]; then
+    info "Backing up current release..."
+    bash "${SCRIPT_DIR}/backup.sh"
+else
+    warn "No current deployment found. Skipping backup."
 fi
 
-###############################################################################
-# Cleanup Old Releases
-###############################################################################
+info "Updating current symlink..."
+run ln -sfn "${RELEASE_DIR}" "${CURRENT_LINK}"
+
+info "Validating Apache configuration..."
+run apachectl configtest
+
+info "Restarting Apache..."
+run systemctl restart httpd
+
+info "Checking Apache status..."
+run systemctl is-active --quiet httpd
+
+info "Running deployment verification..."
+if ! bash "${SCRIPT_DIR}/verify_deployment.sh"; then
+    error "Deployment verification failed."
+    bash "${SCRIPT_DIR}/rollback.sh"
+    exit 1
+fi
 
 info "Pruning old releases..."
-
 bash "${SCRIPT_DIR}/prune_releases.sh"
 
-###############################################################################
-# Success
-###############################################################################
-
-info "==============================================="
 info "Deployment completed successfully."
-info "Release : ${RELEASE_NAME}"
-info "==============================================="
+info "Release: ${RELEASE_NAME}"
