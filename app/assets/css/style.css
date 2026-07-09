@@ -277,6 +277,14 @@ tbody tr:hover {
     color: var(--primary);
 }
 
+.action-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.edit-link,
 .delete-link {
     display: inline-flex;
     align-items: center;
@@ -288,6 +296,15 @@ tbody tr:hover {
     font-weight: 700;
     text-decoration: none;
     transition: 0.2s ease;
+}
+
+.edit-link {
+    color: var(--primary);
+    background: #eff6ff;
+}
+
+.edit-link:hover {
+    background: #dbeafe;
 }
 
 .delete-link:hover {
