@@ -328,7 +328,7 @@ $total=$countResult
     </main>
 
     <footer class="footer">
-        <p>Employee Management System • Version 2.0</p>
+        <p>Employee Management System • Version 3.0.0</p>
     </footer>
 
     <script src="assets/js/app.js"></script>
