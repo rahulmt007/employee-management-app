@@ -2,235 +2,205 @@
 
 ## Overview
 
-The Employee Management Application is deployed on Amazon Web Services (AWS) using a modern release-based deployment strategy with GitHub Actions and AWS Systems Manager (SSM).
+The Employee Management Application is a PHP and MySQL web application deployed on AWS with a release-based deployment model.
 
-The architecture is designed to provide:
+The architecture demonstrates:
 
-- Automated deployments
-- Repeatable releases
-- Zero manual file transfers
-- Easy rollback capability
-- High availability through Auto Scaling
-- Centralized artifact management
+- Load-balanced web application hosting
+- Auto Scaling instance replacement
+- RDS-backed persistent data
+- GitHub Actions CI/CD
+- S3 deployment artifacts
+- AWS Systems Manager deployments without SSH
+- CloudWatch monitoring and alerting
 
----
-
-# High-Level Architecture
+## High-Level Architecture
 
 ```text
-                        Developer
-                            │
-                            ▼
-                  GitHub Repository
-                            │
-                            ▼
-                  GitHub Actions CI/CD
-                            │
-                            ▼
-             Build Deployment Artifact
-                            │
-                            ▼
-                    Amazon S3 Bucket
-                            │
-                            ▼
-               AWS Systems Manager (SSM)
-                            │
-            ┌───────────────┴───────────────┐
-            ▼                               ▼
-      EC2 Instance                    EC2 Instance
-      Apache + PHP                    Apache + PHP
-            │                               │
-            └───────────────┬───────────────┘
-                            ▼
-               Application Load Balancer
-                            │
-                            ▼
-                         End Users
-                            │
-                            ▼
-                    Amazon RDS MySQL
+Developer
+  |
+  v
+GitHub Repository
+  |
+  v
+GitHub Actions Workflow
+  |
+  +--> Build ZIP artifact
+  |
+  +--> Upload artifact to S3
+  |
+  +--> Discover ASG instances
+  |
+  +--> Send SSM deployment command
+          |
+          v
+  Auto Scaling Group: capstone-asg
+          |
+          +-----------------------+
+          |                       |
+          v                       v
+   EC2 Instance             EC2 Instance
+   Apache + PHP             Apache + PHP
+   PHP-FPM                  PHP-FPM
+          |                       |
+          +-----------+-----------+
+                      |
+                      v
+          Application Load Balancer
+                      |
+                      v
+                   End Users
+                      |
+                      v
+                Amazon RDS MySQL
 ```
 
----
+## Runtime Components
 
-# AWS Services Used
+| Component | Role |
+| --- | --- |
+| Apache HTTP Server | Serves the PHP application through the ALB |
+| PHP / PHP-FPM | Runs the application code |
+| MySQL client extension | Connects PHP to Amazon RDS MySQL |
+| `/opt/employee-app/current` | Active application release symlink |
+| `/opt/employee-app/releases` | Historical application releases |
+| `/opt/employee-app/logs` | Deployment logs |
+
+## AWS Services
 
 | Service | Purpose |
-|----------|---------|
-| Amazon EC2 | Hosts the PHP application |
-| Auto Scaling Group | Provides high availability and scaling |
-| Application Load Balancer | Distributes incoming traffic |
-| Amazon RDS MySQL | Stores employee data |
-| Amazon S3 | Stores deployment artifacts |
-| AWS Systems Manager | Executes deployments remotely |
-| GitHub Actions | Continuous Integration and Deployment |
-| Amazon CloudWatch | Monitoring and alarms |
-| Amazon SNS | Notifications |
+| --- | --- |
+| Amazon EC2 | Runs Apache, PHP, and deployment scripts |
+| Auto Scaling Group | Maintains desired capacity and replaces instances |
+| Application Load Balancer | Routes HTTP traffic to healthy instances |
+| Amazon RDS MySQL | Stores employee records |
+| Amazon S3 | Stores generated deployment ZIP artifacts |
+| AWS Systems Manager | Executes deployment commands on EC2 instances |
+| IAM | Grants GitHub Actions and EC2 permissions |
+| CloudWatch | Provides dashboards, alarms, and operational visibility |
+| SNS | Sends alarm notifications |
 
----
-
-# Deployment Architecture
-
-The deployment process is fully automated.
+## Deployment Architecture
 
 ```text
-Git Push
-    │
-    ▼
+Push to main or manual workflow run
+  |
+  v
 GitHub Actions
-    │
-    ▼
-Build Deployment Package
-    │
-    ▼
-Upload Artifact to S3
-    │
-    ▼
-Discover Auto Scaling Group Instances
-    │
-    ▼
-AWS Systems Manager
-    │
-    ▼
-Download Artifact
-    │
-    ▼
+  |
+  v
+Create VERSION and manifest.json
+  |
+  v
+Package app/ and scripts/
+  |
+  v
+Upload artifact to S3
+  |
+  v
+Find InService ASG instances
+  |
+  v
+Confirm SSM Online status
+  |
+  v
+Run deployment command through SSM
+  |
+  v
 bootstrap.sh
-    │
-    ▼
+  |
+  v
 deploy.sh
-    │
-    ▼
-Create Release
-    │
-    ▼
-Update current Symlink
-    │
-    ▼
-Restart Apache
-    │
-    ▼
-Health Check
+  |
+  v
+Create release directory
+  |
+  v
+Update current symlink
+  |
+  v
+Restart PHP-FPM and Apache
+  |
+  v
+Verify healthcheck.php
 ```
 
----
-
-# Release-Based Deployment
+## Release Layout
 
 Each deployment creates a unique release directory.
 
-Example:
-
 ```text
 /opt/employee-app/
-
-├── current
-├── releases
-│   ├── 20260706-183129-7d9d366...
-│   ├── 20260705-164012-5a13f6d...
-│   └── ...
-├── backups
-├── logs
-└── scripts
+|-- current -> /opt/employee-app/releases/<release-id>
+|-- releases/
+|   |-- 20260709-172500-22258c7
+|   |-- 20260709-170100-8facd18
+|   `-- initial
+|-- backups/
+|-- logs/
+`-- scripts/
 ```
 
-The `current` symbolic link always points to the active release.
+The `current` symlink is the active version served by Apache.
 
-This approach provides:
+## Bootstrap vs Deployment
 
-- Zero-copy deployments
-- Fast rollback
-- Release history
-- Easier troubleshooting
+Fresh Auto Scaling instances run `infrastructure/userdata.sh`.
 
----
+The bootstrap script:
 
-# Deployment Components
+- Installs Apache, PHP, PHP-FPM, `rsync`, `unzip`, and `jq`
+- Creates `/opt/employee-app`
+- Creates an initial health check release
+- Points Apache `DocumentRoot` to `/opt/employee-app/current`
+- Starts Apache
 
-## bootstrap.sh
+The bootstrap does **not** deploy the full application. The GitHub Actions workflow must run after instances are available in the ASG and online in SSM.
 
-Responsible for:
+## Health Checks
 
-- Downloading the deployment artifact from Amazon S3
-- Extracting the deployment package
-- Preparing the deployment environment
-- Invoking `deploy.sh`
-
----
-
-## deploy.sh
-
-Responsible for:
-
-- Creating a new release directory
-- Copying application files
-- Backing up the current release
-- Updating the `current` symlink
-- Restarting Apache
-- Verifying deployment
-- Rolling back if verification fails
-- Pruning older releases
-
----
-
-## verify_deployment.sh
-
-Performs a health check against:
+The deployment verification endpoint is:
 
 ```text
 http://localhost/healthcheck.php
 ```
 
-A deployment is considered successful only if the endpoint returns **HTTP 200**.
+A deployment is considered successful only when this endpoint returns `HTTP 200`.
 
----
+## Security Notes
 
-# Security Considerations
+- Deployments are performed through AWS Systems Manager rather than SSH.
+- EC2 instances need SSM and S3 permissions through an IAM instance profile.
+- GitHub Actions currently uses AWS repository secrets.
+- Database credentials are injected into Apache environment configuration during deployment.
+- A future improvement is replacing long-lived AWS access keys with GitHub OIDC and using AWS Secrets Manager or SSM Parameter Store for database credentials.
 
-The solution avoids direct SSH-based deployments.
+## Scaling and Replacement Behavior
 
-Deployments are performed using AWS Systems Manager, which provides:
+The Auto Scaling Group can replace EC2 instances automatically. When that happens:
 
-- IAM-based authentication
-- Encrypted communication
-- Audit logging
-- No inbound SSH requirement for deployment
+1. The new instance runs EC2 user data.
+2. Apache may initially show the default page or only the initial health check release.
+3. The GitHub Actions deployment must run again once the instance is `InService` and `Online` in SSM.
+4. The new instance receives the same release-based application deployment.
 
-Deployment artifacts are stored in Amazon S3 and accessed through IAM roles attached to the EC2 instances.
+## Monitoring
 
----
+The project includes screenshots and configuration evidence for:
 
-# Monitoring
+- CloudWatch dashboard
+- CPU utilization alarm
+- SNS notification path
+- ALB and ASG health state
 
-The environment includes:
+## Current Milestone
 
-- Amazon CloudWatch Dashboard
-- CPU Utilization metrics
-- CloudWatch Alarm
-- Amazon SNS notifications
+The documented application milestone is `v3.0.0`, which includes:
 
----
-
-# Scalability
-
-The application runs inside an Auto Scaling Group.
-
-Benefits include:
-
-- Automatic instance replacement
-- Horizontal scaling
-- High availability
-- Rolling deployments across multiple instances
-
----
-
-# Future Improvements
-
-Potential enhancements include:
-
-- HTTPS with AWS Certificate Manager
-- Route 53 DNS
-- Blue/Green deployments
-- Infrastructure as Code with Terraform
-- Docker containerization
-- Amazon ECS or Amazon EKS migration
+- Add employee
+- View employee directory
+- Search employee
+- Edit employee
+- Delete employee
+- Release-based AWS deployment
+- PHP-FPM restart during deployment to prevent stale PHP output

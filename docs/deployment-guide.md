@@ -2,381 +2,241 @@
 
 ## Overview
 
-This guide explains how to deploy the Employee Management Application using GitHub Actions, Amazon S3, AWS Systems Manager (SSM), and Amazon EC2.
+This guide explains how the Employee Management Application is deployed to AWS using GitHub Actions, Amazon S3, AWS Systems Manager, EC2, an Auto Scaling Group, an Application Load Balancer, and Amazon RDS MySQL.
 
-The deployment process is fully automated and uses a release-based deployment strategy.
+The deployment strategy is release-based. Each deployment creates a new release directory and updates the `current` symlink only after validation.
 
----
+## Deployment Targets
 
-# Deployment Workflow
+| Item | Value |
+| --- | --- |
+| AWS Region | `us-east-1` |
+| Auto Scaling Group | `capstone-asg` |
+| S3 Artifact Bucket | `rahulmt007-employee-management-artifacts` |
+| Application Name | `EmployeeManagement` |
+| Runtime | Apache, PHP, PHP-FPM |
+| Database | Amazon RDS MySQL |
+
+## Workflow Triggers
+
+The workflow runs when:
+
+- Code is pushed to `main`
+- Code is pushed to `refactor/v2-enterprise-pipeline`
+- The workflow is started manually with `workflow_dispatch`
+
+For production-style verification, use `main`.
+
+## Required AWS Infrastructure
+
+The following resources must exist before deployment:
+
+- VPC and subnets
+- Security groups for ALB, EC2, and RDS
+- Application Load Balancer with HTTP listener on port 80
+- Target group registered to the Auto Scaling Group
+- Auto Scaling Group named `capstone-asg`
+- Launch Template with EC2 user data from `infrastructure/userdata.sh`
+- Amazon RDS MySQL database
+- S3 bucket for deployment artifacts
+- IAM instance profile for EC2
+- IAM user or role credentials for GitHub Actions
+- CloudWatch dashboard/alarm and optional SNS topic
+
+## GitHub Secrets
+
+Configure these repository secrets before running the deployment workflow.
+
+| Secret | Purpose |
+| --- | --- |
+| `AWS_ACCESS_KEY_ID` | AWS credential used by GitHub Actions |
+| `AWS_SECRET_ACCESS_KEY` | AWS credential used by GitHub Actions |
+| `DB_HOST` | RDS endpoint |
+| `DB_USER` | Database username |
+| `DB_PASS` | Database password |
+| `DB_NAME` | Database name, for example `employeedb` |
+
+Do not commit secrets into the repository.
+
+## EC2 Instance Profile Permissions
+
+The EC2 instances need permissions for:
+
+- AWS Systems Manager managed instance registration
+- Reading deployment artifacts from S3
+
+Common managed policies used in this project:
+
+- `AmazonSSMManagedInstanceCore`
+- S3 read access, scoped to the artifact bucket where possible
+
+## GitHub Actions Permissions
+
+The GitHub Actions AWS identity needs permissions for:
+
+- Uploading artifacts to S3
+- Describing Auto Scaling Groups
+- Describing SSM managed instances
+- Sending SSM commands
+- Reading SSM command invocation output
+
+Future improvement: replace long-lived AWS keys with GitHub OIDC and an assumable IAM role.
+
+## Deployment Flow
 
 ```text
-Developer
-    │
-    ▼
-Git Push
-    │
-    ▼
-GitHub Actions
-    │
-    ▼
-Build Deployment Artifact
-    │
-    ▼
-Upload Artifact to Amazon S3
-    │
-    ▼
-AWS Systems Manager (SSM)
-    │
-    ▼
-EC2 Instances
-    │
-    ▼
-bootstrap.sh
-    │
-    ▼
-deploy.sh
-    │
-    ▼
-Health Check
+Developer pushes to main
+  |
+  v
+GitHub Actions starts
+  |
+  v
+Validate repository files
+  |
+  v
+Generate VERSION and manifest.json
+  |
+  v
+Package app/ and scripts/ into ZIP
+  |
+  v
+Upload artifact to GitHub Actions and S3
+  |
+  v
+Discover InService ASG instances
+  |
+  v
+Verify SSM PingStatus is Online
+  |
+  v
+Send AWS-RunShellScript command
+  |
+  v
+Download artifact on EC2
+  |
+  v
+Run scripts/bootstrap.sh
+  |
+  v
+Run scripts/deploy.sh
+  |
+  v
+Verify localhost health check
 ```
 
----
+## Release Directory Layout
 
-# Prerequisites
-
-## AWS Infrastructure
-
-The following AWS resources must already exist.
-
-### Amazon EC2
-
-- Amazon Linux 2023
-- Apache HTTP Server
-- PHP
-- AWS CLI
-- unzip
-- rsync
-
----
-
-### Amazon RDS
-
-- MySQL
-- Security Group allowing connections from EC2
-
----
-
-### Application Load Balancer
-
-- Listener on HTTP (Port 80)
-- Target Group configured for EC2 instances
-
----
-
-### Auto Scaling Group
-
-Example:
-
-```
-Auto Scaling Group
-
-Name
-
-capstone-asg
-
-Desired Capacity
-
-2
-
-Minimum
-
-2
-
-Maximum
-
-4
+```text
+/opt/employee-app
+|-- current -> releases/<active-release>
+|-- releases/
+|-- backups/
+|-- logs/
+`-- scripts/
 ```
 
----
+Each release name includes a timestamp and commit SHA.
 
-### Amazon S3
-
-Example bucket:
-
-```
-rahulmt007-employee-management-artifacts
-```
-
-Stores versioned deployment artifacts.
-
----
-
-### AWS Systems Manager
-
-Requirements:
-
-- SSM Agent installed
-- EC2 instances registered with Systems Manager
-- IAM Instance Profile attached
-
----
-
-# IAM Permissions
-
-The EC2 instance profile must allow:
-
-- AmazonSSMManagedInstanceCore
-- AmazonS3ReadOnlyAccess
-
-GitHub Actions IAM user requires:
-
-- S3 Upload
-- SSM SendCommand
-- Auto Scaling Read
-- EC2 Describe
-
----
-
-# GitHub Secrets
-
-Configure the following repository secrets.
-
-| Secret | Description |
-|---------|-------------|
-| AWS_ACCESS_KEY_ID | AWS Access Key |
-| AWS_SECRET_ACCESS_KEY | AWS Secret Key |
-
-The workflow uses:
-
-```
-AWS_REGION = us-east-1
-```
-
-```
-S3_BUCKET = rahulmt007-employee-management-artifacts
-```
-
-```
-ASG_NAME = capstone-asg
-```
-
----
-
-# Repository Structure
-
-```
-.
-├── app
-│
-├── scripts
-│
-├── docs
-│
-├── .github
-│   └── workflows
-│
-└── README.md
-```
-
----
-
-# Deployment Scripts
+## Deployment Scripts
 
 | Script | Responsibility |
-|----------|---------------|
-| bootstrap.sh | Downloads deployment package and starts deployment |
-| deploy.sh | Performs application deployment |
-| backup.sh | Creates deployment backup |
-| rollback.sh | Restores previous release |
-| verify_deployment.sh | Runs health check |
-| prune_releases.sh | Removes old releases |
-| common.sh | Shared configuration |
+| --- | --- |
+| `bootstrap.sh` | Downloads and extracts the deployment artifact, then starts deployment |
+| `deploy.sh` | Creates release, copies files, updates symlink, restarts services, verifies deployment |
+| `backup.sh` | Archives the previous release before switching |
+| `rollback.sh` | Repoints `current` to the previous release |
+| `verify_deployment.sh` | Confirms `healthcheck.php` returns HTTP 200 |
+| `prune_releases.sh` | Keeps recent releases and removes older ones |
+| `common.sh` | Shared deployment paths and helper functions |
 
----
+## Service Restarts
 
-# Release Directory Layout
+The deployment restarts:
 
-```
-/opt/employee-app
+- `php-fpm`, when available
+- `httpd`
 
-├── current
-├── releases
-├── backups
-├── logs
-└── scripts
-```
+Restarting PHP-FPM is important because PHP runtime caching can otherwise keep serving stale output even when the deployed PHP file is updated.
 
-Each deployment creates a unique release directory.
+## Manual Deployment
 
-Example:
+Use this when instances were replaced or the app shows Apache's default page.
 
-```
-releases/
+1. Open GitHub repository.
+2. Go to **Actions**.
+3. Select **Employee Management Deployment**.
+4. Click **Run workflow**.
+5. Select branch `main`.
+6. Wait for both jobs to succeed:
+   - `Build Deployment Artifact`
+   - `Deploy to Auto Scaling Group`
+7. Open the ALB URL and hard refresh.
 
-20260706-183129-7d9d366...
-```
+## Local Git Deployment Steps
 
-The symbolic link
-
-```
-current
-```
-
-always points to the active deployment.
-
----
-
-# Deployment Steps
-
-## Step 1
-
-Developer pushes code.
-
-```
-git push
+```bash
+git checkout main
+git pull origin main
+git status
+git add <changed-files>
+git commit -m "Describe the change"
+git push origin main
 ```
 
----
+The push to `main` starts the GitHub Actions deployment.
 
-## Step 2
+## Verification Checklist
 
-GitHub Actions
+After deployment:
 
-- validates repository
-- builds deployment artifact
-- uploads artifact to Amazon S3
+- GitHub Actions workflow completed successfully
+- Artifact uploaded to S3
+- SSM command succeeded on all target instances
+- ALB target group shows healthy targets
+- Application loads through the ALB DNS name
+- Add, search, edit, and delete employee flows work
+- Footer shows `Employee Management System • Version 3.0.0`
+- `http://localhost/healthcheck.php` returns `OK` on EC2
 
----
+## Useful EC2 Commands
 
-## Step 3
-
-GitHub Actions discovers EC2 instances inside
-
-```
-capstone-asg
-```
-
----
-
-## Step 4
-
-AWS Systems Manager executes
-
-```
-bootstrap.sh
-```
-
-on every instance.
-
----
-
-## Step 5
-
-bootstrap.sh
-
-- downloads artifact
-- extracts artifact
-- launches deploy.sh
-
----
-
-## Step 6
-
-deploy.sh
-
-- creates release
-- copies application
-- updates current symlink
-- restarts Apache
-- verifies deployment
-- performs rollback if needed
-
----
-
-# Health Check
-
-Deployment verification uses
-
-```
-http://localhost/healthcheck.php
-```
-
-Expected response
-
-```
-HTTP 200
-
-OK
-```
-
----
-
-# Rollback
-
-Rollback is automatic if deployment verification fails.
-
-It can also be executed manually.
-
-```
-bash rollback.sh
-```
-
----
-
-# Useful Commands
-
-Apache Status
+Run through SSM Session Manager or SSM Run Command.
 
 ```bash
 sudo systemctl status httpd
+sudo systemctl status php-fpm
 ```
-
-Restart Apache
-
-```bash
-sudo systemctl restart httpd
-```
-
-Health Check
 
 ```bash
 curl http://localhost/healthcheck.php
 ```
 
-Current Release
-
 ```bash
 ls -la /opt/employee-app/current
+readlink -f /opt/employee-app/current
 ```
 
-Release History
+```bash
+grep -n "Version" /opt/employee-app/current/index.php
+```
 
 ```bash
 ls -la /opt/employee-app/releases
-```
-
-Deployment Logs
-
-```bash
 ls -la /opt/employee-app/logs
 ```
 
----
+## Instance Replacement Note
 
-# Deployment Verification Checklist
+If EC2 instances are terminated and the Auto Scaling Group launches new ones, the new instances may initially show Apache's default page or the initial bootstrap release.
 
-- GitHub Actions completed successfully
-- Deployment artifact uploaded to Amazon S3
-- SSM command executed successfully
-- Apache service running
-- Health check returns HTTP 200
-- Application accessible through the Application Load Balancer
+Wait until the instances are:
 
----
+- `InService` in the Auto Scaling Group
+- `healthy` in the target group
+- `Online` in Systems Manager
 
-# Version
+Then rerun the GitHub Actions workflow on `main`.
 
-Current deployment framework
+## Version
 
-**v1.0-ssm-cicd**
+Current documented milestone: `v3.0.0`

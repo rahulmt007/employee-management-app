@@ -2,430 +2,377 @@
 
 ## Overview
 
-This document provides solutions to common issues that may occur while building, deploying, and operating the Employee Management Application.
+This guide captures issues encountered while building, deploying, and operating the AWS Employee Management Application.
 
-Most of these scenarios were encountered and resolved during the development of this project.
+The most important lesson: when the Auto Scaling Group replaces instances, the new EC2 instances need a fresh GitHub Actions deployment after bootstrap.
 
----
+## Quick Checks
 
-# Deployment Pipeline
+Start with these checks:
 
-## GitHub Actions fails immediately
+```bash
+git status
+git log --oneline -5
+```
+
+In GitHub Actions:
+
+- Confirm the latest workflow ran on `main`
+- Confirm both jobs succeeded
+- Open `Deploy to Auto Scaling Group`
+- Confirm every current ASG instance was listed and deployed
+
+In AWS:
+
+- ASG instances are `InService`
+- Target group targets are `healthy`
+- SSM managed instances are `Online`
+- RDS status is `Available`
+
+## GitHub Actions Fails During Validation
 
 ### Symptoms
 
-- Workflow stops during repository validation.
-- Build artifact is not created.
+- Workflow stops early
+- Deployment artifact is not created
+- Validation step reports missing files
 
-### Possible Causes
+### Common Causes
 
-- Missing files
-- Incorrect repository structure
-- Invalid YAML syntax
+- Missing `app/` directory
+- Missing `scripts/` directory
+- Shell script syntax issue
+- File renamed but workflow validation not updated
 
 ### Resolution
 
-Verify the repository structure.
+Check the repository structure:
 
+```bash
+git ls-tree -r --name-only HEAD
 ```
-.
-├── app
-├── scripts
-├── docs
-├── .github
-│   └── workflows
-└── README.md
+
+Validate scripts on a Linux environment:
+
+```bash
+bash -n scripts/bootstrap.sh
+bash -n scripts/common.sh
+bash -n scripts/deploy.sh
+bash -n scripts/backup.sh
+bash -n scripts/rollback.sh
+bash -n scripts/verify_deployment.sh
+bash -n scripts/prune_releases.sh
 ```
+
+## No InService Instances Found
+
+### Symptoms
+
+GitHub Actions reports:
+
+```text
+No InService instances found in ASG.
+```
+
+### Common Causes
+
+- Auto Scaling Group desired capacity is `0`
+- Instances are still launching
+- Wrong ASG name
+- Wrong AWS region
+
+### Resolution
+
+Verify:
+
+```bash
+aws autoscaling describe-auto-scaling-groups \
+  --region us-east-1 \
+  --auto-scaling-group-names capstone-asg
+```
+
+Wait until instances are `InService`, then rerun the workflow.
+
+## SSM Instance Is Not Online
+
+### Symptoms
+
+GitHub Actions reports:
+
+```text
+Instance <id> is not Online in SSM.
+```
+
+### Common Causes
+
+- SSM Agent not running
+- Missing IAM instance profile
+- Instance has no outbound network path
+- New instance is still bootstrapping
+
+### Resolution
+
+Check the EC2 IAM instance profile includes SSM permissions.
+
+Expected managed policy:
+
+```text
+AmazonSSMManagedInstanceCore
+```
+
+Wait a few minutes after launch and rerun the deployment workflow.
+
+## Apache Default Page: "It works!"
+
+### Symptoms
+
+The ALB URL shows:
+
+```text
+It works!
+```
+
+or the browser tab title says:
+
+```text
+It works! Apache httpd
+```
+
+### Cause
+
+The EC2 instance is serving Apache's default page or has only completed bootstrap. The full application deployment has not been applied to that instance.
+
+This commonly happens after manually terminating EC2 instances and letting the Auto Scaling Group launch replacements.
+
+### Resolution
+
+1. Wait for new instances to become `InService`.
+2. Confirm they are `Online` in Systems Manager.
+3. Rerun GitHub Actions workflow on `main`.
+4. Hard refresh the ALB URL.
+
+If the issue remains, verify Apache's `DocumentRoot`:
+
+```bash
+grep -R "DocumentRoot" /etc/httpd/conf /etc/httpd/conf.d
+```
+
+Expected:
+
+```text
+DocumentRoot "/opt/employee-app/current"
+```
+
+## Application Still Shows Old Version
+
+### Symptoms
+
+The source code and GitHub Actions deployment are updated, but the browser still shows older PHP output, such as:
+
+```text
+Employee Management System • Version 2.0
+```
+
+### Common Causes
+
+- Browser cache
+- ALB routing to an instance that missed deployment
+- PHP-FPM or PHP opcode cache serving stale output
+
+### Resolution
+
+First hard refresh:
+
+```text
+Ctrl + F5
+```
+
+Then refresh multiple times. If the version changes between requests, compare target group instance IDs with the deployment log.
+
+On the EC2 instance, verify the deployed file:
+
+```bash
+grep -n "Version" /opt/employee-app/current/index.php
+readlink -f /opt/employee-app/current
+```
+
+Restart services:
+
+```bash
+sudo systemctl restart php-fpm
+sudo systemctl restart httpd
+```
+
+The deployment script now restarts PHP-FPM when available to prevent this issue.
+
+## S3 Artifact Download Fails
+
+### Symptoms
+
+Deployment logs show an artifact download failure.
+
+### Common Causes
+
+- Incorrect S3 bucket name
+- Artifact was not uploaded
+- EC2 instance role lacks S3 read permission
+- Region mismatch
+
+### Resolution
+
+Verify artifacts:
+
+```bash
+aws s3 ls s3://rahulmt007-employee-management-artifacts
+```
+
+Check EC2 instance role permissions.
+
+## Database Connection Failed
+
+### Symptoms
+
+Application shows:
+
+```text
+Database connection failed
+```
+
+### Common Causes
+
+- Incorrect `DB_HOST`, `DB_USER`, `DB_PASS`, or `DB_NAME`
+- RDS security group does not allow EC2 access
+- RDS instance is stopped or unavailable
+- Apache environment file was not updated
+
+### Resolution
+
+Confirm GitHub secrets:
+
+```text
+DB_HOST
+DB_USER
+DB_PASS
+DB_NAME
+```
+
+Check Apache environment configuration on EC2:
+
+```bash
+sudo cat /etc/httpd/conf.d/employee-app-env.conf
+```
+
+Do not share this file publicly because it contains database credentials.
+
+Restart services:
+
+```bash
+sudo systemctl restart php-fpm
+sudo systemctl restart httpd
+```
+
+## Deployment Verification Fails
+
+### Symptoms
+
+Deployment rolls back automatically.
+
+### Cause
+
+`verify_deployment.sh` did not receive HTTP 200 from:
+
+```text
+http://localhost/healthcheck.php
+```
+
+### Resolution
 
 Run:
 
 ```bash
-git status
-git ls-tree -r --name-only HEAD
-```
-
----
-
-# AWS Region Mismatch
-
-## Symptoms
-
-GitHub Actions reports:
-
-```
-No instances found
-```
-
-or
-
-```
-Auto Scaling Group not found
-```
-
-### Cause
-
-GitHub Actions and AWS CLI are using different AWS Regions.
-
-### Resolution
-
-Verify the configured region.
-
-```bash
-aws configure get region
-```
-
-Ensure the workflow and AWS resources use the same region.
-
-Example:
-
-```
-us-east-1
-```
-
----
-
-# Auto Scaling Group Discovery Failure
-
-## Symptoms
-
-```
-Raw Output:
-None
-```
-
-### Cause
-
-Incorrect region or incorrect Auto Scaling Group name.
-
-### Resolution
-
-Verify the Auto Scaling Group.
-
-```bash
-aws autoscaling describe-auto-scaling-groups \
---region us-east-1 \
---auto-scaling-group-names capstone-asg
-```
-
-Confirm the EC2 instances are in the **InService** state.
-
----
-
-# SSM Deployment Failure
-
-## Symptoms
-
-GitHub Actions stops at:
-
-```
-Wait For Deployment
-```
-
-### Cause
-
-The SSM command failed on one or more EC2 instances.
-
-### Resolution
-
-Retrieve the command output.
-
-```bash
-aws ssm get-command-invocation \
---command-id <COMMAND_ID> \
---instance-id <INSTANCE_ID>
-```
-
-Review:
-
-- StandardOutputContent
-- StandardErrorContent
-
----
-
-# S3 Download Failure
-
-## Symptoms
-
-```
-Unable to download deployment artifact
-```
-
-### Possible Causes
-
-- Incorrect bucket name
-- Missing IAM permission
-- Artifact not uploaded
-
-### Resolution
-
-Verify the artifact exists.
-
-```bash
-aws s3 ls s3://rahulmt007-employee-management-artifacts
-```
-
-Verify the EC2 instance IAM role includes S3 read permissions.
-
----
-
-# bootstrap.sh Fails
-
-## Symptoms
-
-```
-S3_BUCKET is not set
-```
-
-### Cause
-
-Required environment variables were not exported before executing the bootstrap script.
-
-### Resolution
-
-Ensure the workflow exports:
-
-```
-S3_BUCKET
-ARTIFACT_NAME
-GITHUB_SHA
-```
-
-before running:
-
-```bash
-bash scripts/bootstrap.sh
-```
-
----
-
-# Apache Not Serving the Application
-
-## Symptoms
-
-Application returns:
-
-```
-404 Not Found
-```
-
-or
-
-```
-Forbidden
-```
-
-### Cause
-
-Apache DocumentRoot does not match the deployment directory.
-
-### Resolution
-
-Verify the DocumentRoot.
-
-```bash
-grep -R "DocumentRoot" \
-/etc/httpd/conf \
-/etc/httpd/conf.d
-```
-
-Expected:
-
-```
-DocumentRoot "/opt/employee-app/current"
-```
-
----
-
-# Apache Service Failure
-
-## Symptoms
-
-Deployment verification fails.
-
-### Resolution
-
-Check Apache status.
-
-```bash
+curl -i http://localhost/healthcheck.php
 sudo systemctl status httpd
+sudo journalctl -u httpd --no-pager
 ```
 
-Restart Apache.
+Check the active release:
 
 ```bash
-sudo systemctl restart httpd
-```
-
-Review logs.
-
-```bash
-sudo journalctl -u httpd
-```
-
----
-
-# Health Check Failure
-
-## Symptoms
-
-Deployment rollback occurs automatically.
-
-### Resolution
-
-Verify the endpoint.
-
-```bash
-curl http://localhost/healthcheck.php
-```
-
-Expected response:
-
-```
-OK
-```
-
----
-
-# Deployment Path Issues
-
-## Symptoms
-
-Deployment succeeds but application does not update.
-
-### Cause
-
-Deployment directory does not match Apache configuration.
-
-### Correct Layout
-
-```
-/opt/employee-app
-
-├── current
-├── releases
-├── backups
-├── logs
-└── scripts
-```
-
-The symbolic link
-
-```
-current
-```
-
-must always point to the active release.
-
----
-
-# Verify Current Release
-
-```bash
+readlink -f /opt/employee-app/current
 ls -la /opt/employee-app/current
 ```
 
-Expected:
+## Rollback Problems
 
-```
-current -> releases/<release-id>
-```
+### Symptoms
 
----
+Manual rollback fails before switching releases.
 
-# IAM Role Issues
+### Possible Cause
 
-## Symptoms
-
-Artifact download fails.
+Some helper scripts source `common.sh`, which expects deployment environment variables during normal deployment.
 
 ### Resolution
 
-Verify the EC2 IAM role includes:
+Prefer the automated rollback path triggered by `deploy.sh`.
 
-- AmazonSSMManagedInstanceCore
-- AmazonS3ReadOnlyAccess (or broader S3 permissions if appropriate)
-
-For consistency, all instances in the Auto Scaling Group should use the same IAM instance profile.
-
----
-
-# Useful Commands
-
-## Apache
-
-```bash
-sudo systemctl status httpd
-```
-
-```bash
-sudo systemctl restart httpd
-```
-
----
-
-## Health Check
-
-```bash
-curl http://localhost/healthcheck.php
-```
-
----
-
-## Current Release
-
-```bash
-ls -la /opt/employee-app/current
-```
-
----
-
-## Release History
+If manual rollback is needed, inspect:
 
 ```bash
 ls -la /opt/employee-app/releases
+readlink -f /opt/employee-app/current
 ```
 
----
+Then carefully repoint the symlink only after identifying the correct previous release.
 
-## Deployment Logs
+## Useful Commands
+
+### Apache and PHP-FPM
 
 ```bash
+sudo systemctl status httpd
+sudo systemctl status php-fpm
+sudo systemctl restart php-fpm
+sudo systemctl restart httpd
+```
+
+### Application Release
+
+```bash
+readlink -f /opt/employee-app/current
+ls -la /opt/employee-app/releases
 ls -la /opt/employee-app/logs
 ```
 
----
-
-## AWS Systems Manager
+### Health Check
 
 ```bash
-aws ssm list-command-invocations
+curl -i http://localhost/healthcheck.php
 ```
 
----
-
-## Amazon S3
+### Version Check
 
 ```bash
-aws s3 ls s3://rahulmt007-employee-management-artifacts
+grep -n "Version" /opt/employee-app/current/index.php
 ```
 
----
+### SSM Command Output
 
-# Lessons Learned
+```bash
+aws ssm get-command-invocation \
+  --command-id <COMMAND_ID> \
+  --instance-id <INSTANCE_ID>
+```
 
-During this project, several important operational lessons emerged:
+## Lessons Learned
 
-- Keep the AWS Region consistent across the AWS CLI, GitHub Actions, and infrastructure.
-- Standardize the IAM instance profile used by all EC2 instances in the Auto Scaling Group.
-- Ensure the deployment path matches Apache's configured `DocumentRoot`.
-- Validate the repository structure before packaging artifacts.
-- Release-based deployments with a `current` symbolic link simplify rollbacks and reduce downtime.
-- AWS Systems Manager enables secure deployments without requiring SSH access.
+- Keep AWS region consistent across GitHub Actions, CLI, and resources.
+- Do not assume fresh ASG instances have the full app. They need the deployment workflow after bootstrap.
+- Restart PHP-FPM as part of PHP deployments.
+- Compare ASG instance IDs, target group IDs, and GitHub Actions target instance logs when debugging mixed behavior.
+- Store screenshots and documentation before deleting AWS resources.
+- Keep secrets out of screenshots and repository files.
 
----
+## Version
 
-# Version
-
-Current deployment framework:
-
-**v1.0-ssm-cicd**
+Current documented milestone: `v3.0.0`
