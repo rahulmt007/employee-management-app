@@ -106,6 +106,10 @@ $editEmployee=$editResult->fetch_assoc();
 
 }
 
+$isEditing=$editEmployee !== null;
+$formName=$isEditing ? htmlspecialchars($editEmployee['name'], ENT_QUOTES, 'UTF-8') : "";
+$formAddress=$isEditing ? htmlspecialchars($editEmployee['address'], ENT_QUOTES, 'UTF-8') : "";
+
 // Search
 $search="";
 
@@ -171,11 +175,11 @@ $total=$countResult
 
             <div class="card">
                 <div class="card-header">
-                    <h2><?= $editEmployee ? "Edit Employee" : "Add Employee" ?></h2>
+                    <h2><?= $isEditing ? "Edit Employee" : "Add Employee" ?></h2>
                 </div>
 
-                <form method="POST" class="form">
-                    <?php if($editEmployee): ?>
+                <form id="employee-form" method="POST" class="form">
+                    <?php if($isEditing): ?>
                         <input
                             type="hidden"
                             name="id"
@@ -189,7 +193,7 @@ $total=$countResult
                             type="text"
                             name="name"
                             placeholder="Enter employee name"
-                            value="<?= $editEmployee ? htmlspecialchars($editEmployee['name']) : "" ?>"
+                            value="<?= $formName ?>"
                             required>
                     </div>
 
@@ -200,12 +204,12 @@ $total=$countResult
                             type="text"
                             name="address"
                             placeholder="Enter employee address"
-                            value="<?= $editEmployee ? htmlspecialchars($editEmployee['address']) : "" ?>"
+                            value="<?= $formAddress ?>"
                             required>
                     </div>
 
                     <div class="button-row">
-                        <?php if($editEmployee): ?>
+                        <?php if($isEditing): ?>
                             <button class="btn btn-primary" name="update">
                                 Update Employee
                             </button>
@@ -296,7 +300,7 @@ $total=$countResult
                                         <div class="action-row">
                                             <a
                                                 class="edit-link"
-                                                href="?edit=<?= $row['id'] ?>">
+                                                href="?edit=<?= $row['id'] ?>#employee-form">
                                                 Edit
                                             </a>
 
