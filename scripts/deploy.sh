@@ -57,6 +57,16 @@ verify_database_connection() {
     '
 }
 
+restart_php_fpm_if_available() {
+    if systemctl list-unit-files php-fpm.service --no-pager 2>/dev/null | grep -q '^php-fpm.service'; then
+        info "Restarting PHP-FPM..."
+        run systemctl restart php-fpm
+        run systemctl is-active --quiet php-fpm
+    else
+        info "PHP-FPM service not found. Skipping PHP-FPM restart."
+    fi
+}
+
 [[ -d "${ARTIFACT_DIR}" ]] || fatal "Artifact directory does not exist."
 [[ -f "${ARTIFACT_DIR}/index.php" ]] || fatal "index.php not found."
 
@@ -87,6 +97,8 @@ run ln -sfn "${RELEASE_DIR}" "${CURRENT_LINK}"
 
 info "Validating Apache configuration..."
 run apachectl configtest
+
+restart_php_fpm_if_available
 
 info "Restarting Apache..."
 run systemctl restart httpd
