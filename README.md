@@ -1,6 +1,6 @@
 # AWS Employee Management Application
 
-![Application screenshot](screenshots/application/application_home_v2.png)
+![Employee dashboard screenshot](screenshots/application/dashboard_v3.2.0.png)
 
 ## Overview
 
@@ -40,7 +40,7 @@ This project demonstrates both application development and DevOps delivery:
 | --- | --- |
 | Application version | `v3.2.0` |
 | Containerization release | `v3.1.0` |
-| Latest runtime fix commit | `22258c7` |
+| Authentication/session fix commit | `5000fc9` |
 | Employee edit feature commit | `25d9f90` |
 | Region | `us-east-1` |
 | Auto Scaling Group | `capstone-asg` |
@@ -50,7 +50,11 @@ This project demonstrates both application development and DevOps delivery:
 
 ### Application
 
-![Employee edit form](screenshots/application/application_edit_v2.png)
+![Login page](screenshots/application/login_v3.2.0.png)
+
+![Authenticated employee dashboard](screenshots/application/dashboard_v3.2.0.png)
+
+![Employee edit form](screenshots/application/edit_employee_v3.2.0.png)
 
 ### Architecture
 
