@@ -1,0 +1,16 @@
+.git
+.github
+.codex
+.agents
+docs
+infrastructure
+inspect-artifact
+logs
+screenshots
+scripts
+*.b64
+launch-template*.json
+README.md
+userdata.sh
+Dockerfile
+docker-compose.yml

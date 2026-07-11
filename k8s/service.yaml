@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: employee-management-service
+  namespace: employee-management
+  labels:
+    app.kubernetes.io/name: employee-management
+    app.kubernetes.io/component: web
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: employee-management
+    app.kubernetes.io/component: web
+  ports:
+    - name: http
+      port: 80
+      targetPort: http

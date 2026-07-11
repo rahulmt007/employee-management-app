@@ -16,6 +16,8 @@ This project demonstrates both application development and DevOps delivery:
 - Release-based deployments with rollback support
 - Application Load Balancer in front of an Auto Scaling Group
 - CloudWatch monitoring and alarms
+- Docker Compose local development stack
+- Kubernetes-ready deployment manifests
 
 > Cost note: the live AWS environment may be stopped or deleted after documentation to avoid ongoing AWS Free Tier usage. Screenshots and documentation are included so the project remains reviewable when the infrastructure is offline.
 
@@ -28,12 +30,15 @@ This project demonstrates both application development and DevOps delivery:
 - Delete employee records
 - Health check endpoint for deployment verification
 - Release-based deployment under `/opt/employee-app`
+- Local Docker Compose environment
+- Kubernetes manifests for local clusters or future EKS deployment
 
 ## Latest Release
 
 | Item | Value |
 | --- | --- |
 | Application version | `v3.0.0` |
+| Containerization release candidate | `v3.1.0` |
 | Latest runtime fix commit | `22258c7` |
 | Employee edit feature commit | `25d9f90` |
 | Region | `us-east-1` |
@@ -158,6 +163,42 @@ Restart PHP-FPM and Apache
 Verify http://localhost/healthcheck.php returns 200
 ```
 
+## Containerized Local Development
+
+The project can run locally with Docker Compose:
+
+```bash
+docker compose up --build
+```
+
+Local URL:
+
+```text
+http://localhost:8080
+```
+
+The Compose stack runs:
+
+- PHP 8.2 + Apache application container
+- MySQL 8.0 database container
+- Docker health checks for app and database
+
+See [Containerization Guide](docs/containerization.md).
+
+## Kubernetes Manifests
+
+Kubernetes manifests are included under `k8s/` for local demos or future production adaptation:
+
+- App Deployment with two replicas
+- ClusterIP Service
+- ConfigMap and Secret example
+- Readiness and liveness probes
+- Optional Ingress
+- Optional HorizontalPodAutoscaler
+- Optional local MySQL manifest for `kind`, `minikube`, or Docker Desktop Kubernetes
+
+See [Kubernetes Guide](docs/kubernetes.md).
+
 ## Release-Based Deployment
 
 Application files are deployed to timestamped release directories:
@@ -190,6 +231,9 @@ Benefits:
 - [Architecture](docs/architecture.md)
 - [Deployment Guide](docs/deployment-guide.md)
 - [Troubleshooting Guide](docs/troubleshooting.md)
+- [Containerization Guide](docs/containerization.md)
+- [Kubernetes Guide](docs/kubernetes.md)
+- [v3.1.0 Release Notes](docs/releases/v3.1.0.md)
 - [AWS Teardown Guide](docs/aws-teardown.md)
 
 ## Repository Structure
@@ -203,9 +247,12 @@ Benefits:
 |   |-- healthcheck.php
 |   `-- index.php
 |-- docs/
+|-- k8s/
 |-- infrastructure/userdata.sh
 |-- scripts/
 |-- screenshots/
+|-- Dockerfile
+|-- docker-compose.yml
 `-- README.md
 ```
 
@@ -217,7 +264,8 @@ Benefits:
 - Terraform infrastructure as code
 - Blue/green or rolling deployment strategy
 - Prepared SQL statements and CSRF protection
-- Docker containerization and ECS deployment
+- Publish container image to a registry
+- Amazon EKS or ECS production deployment
 
 ## Author
 

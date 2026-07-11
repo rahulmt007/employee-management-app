@@ -1,0 +1,45 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: employee-management-app
+    ports:
+      - "8080:80"
+    environment:
+      DB_HOST: db
+      DB_USER: employee_user
+      DB_PASS: employee_pass
+      DB_NAME: employeedb
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost/healthcheck.php || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  db:
+    image: mysql:8.0
+    container_name: employee-management-db
+    ports:
+      - "3307:3306"
+    environment:
+      MYSQL_DATABASE: employeedb
+      MYSQL_USER: employee_user
+      MYSQL_PASSWORD: employee_pass
+      MYSQL_ROOT_PASSWORD: root_pass
+    volumes:
+      - employee_mysql_data:/var/lib/mysql
+      - ./app/sql/database.sql:/docker-entrypoint-initdb.d/01-database.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost -u$${MYSQL_USER} -p$${MYSQL_PASSWORD} --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+volumes:
+  employee_mysql_data:
