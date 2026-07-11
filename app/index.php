@@ -1,9 +1,14 @@
 <?php
 
+session_start();
+
 $host     = getenv('DB_HOST');
 $user     = getenv('DB_USER');
 $password = getenv('DB_PASS');
 $dbname   = getenv('DB_NAME');
+$adminUser = getenv('AUTH_ADMIN_USER') ?: 'admin';
+$adminPass = getenv('AUTH_ADMIN_PASS') ?: 'ChangeMe123!';
+$loginError = "";
 
 $conn = new mysqli(
     $host,
@@ -25,6 +30,169 @@ address VARCHAR(200) NOT NULL,
 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 )
 ");
+
+// Create users table
+$conn->query("
+CREATE TABLE IF NOT EXISTS users (
+id INT AUTO_INCREMENT PRIMARY KEY,
+username VARCHAR(100) NOT NULL UNIQUE,
+password_hash VARCHAR(255) NOT NULL,
+created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+)
+");
+
+// Seed initial admin user
+$userCountResult=$conn->query(
+"SELECT COUNT(*) total FROM users"
+);
+
+$userCount=$userCountResult
+->fetch_assoc()['total'];
+
+if((int)$userCount === 0){
+
+$passwordHash=password_hash($adminPass, PASSWORD_DEFAULT);
+
+$stmt=$conn->prepare("
+INSERT INTO users(username,password_hash)
+VALUES(?,?)
+");
+
+$stmt->bind_param("ss", $adminUser, $passwordHash);
+$stmt->execute();
+$stmt->close();
+
+}
+
+// Logout
+if(isset($_GET['logout'])){
+
+session_unset();
+session_destroy();
+
+header("Location:index.php");
+
+exit();
+
+}
+
+// Login
+if(isset($_POST['login'])){
+
+$loginUsername=trim($_POST['username']);
+$loginPassword=$_POST['password'];
+
+$stmt=$conn->prepare("
+SELECT id, username, password_hash
+FROM users
+WHERE username=?
+LIMIT 1
+");
+
+$stmt->bind_param("s", $loginUsername);
+$stmt->execute();
+$loginResult=$stmt->get_result();
+$userRecord=$loginResult->fetch_assoc();
+$stmt->close();
+
+if($userRecord && password_verify($loginPassword, $userRecord['password_hash'])){
+
+session_regenerate_id(true);
+
+$_SESSION['user_id']=$userRecord['id'];
+$_SESSION['username']=$userRecord['username'];
+
+header("Location:index.php");
+
+exit();
+
+}
+
+$loginError="Invalid username or password.";
+
+}
+
+$isAuthenticated=isset($_SESSION['user_id']);
+$currentUser=$isAuthenticated ? htmlspecialchars($_SESSION['username'], ENT_QUOTES, 'UTF-8') : "";
+
+if(!$isAuthenticated):
+
+?>
+
+
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Employee Management Login</title>
+    <link rel="stylesheet" href="assets/css/style.css">
+</head>
+
+<body class="auth-body">
+
+    <main class="auth-page">
+        <section class="auth-card">
+            <div class="auth-brand">
+                <span class="brand-icon">ðŸ‘¨â€ðŸ’¼</span>
+                <div>
+                    <h1>Employee Management System</h1>
+                    <p>Sign in to manage employee records.</p>
+                </div>
+            </div>
+
+            <?php if($loginError !== ""): ?>
+                <div class="alert alert-error">
+                    <?= htmlspecialchars($loginError, ENT_QUOTES, 'UTF-8') ?>
+                </div>
+            <?php endif; ?>
+
+            <form method="POST" class="form">
+                <div class="form-group">
+                    <label for="username">Username</label>
+                    <input
+                        id="username"
+                        type="text"
+                        name="username"
+                        placeholder="Enter username"
+                        autocomplete="username"
+                        required>
+                </div>
+
+                <div class="form-group">
+                    <label for="password">Password</label>
+                    <input
+                        id="password"
+                        type="password"
+                        name="password"
+                        placeholder="Enter password"
+                        autocomplete="current-password"
+                        required>
+                </div>
+
+                <button
+                    class="btn btn-primary"
+                    type="submit"
+                    name="login"
+                    value="1">
+                    Sign In
+                </button>
+            </form>
+        </section>
+    </main>
+
+</body>
+</html>
+
+
+<?php
+
+$conn->close();
+
+exit();
+
+endif;
 
 // Add employee
 if(isset($_POST['add'])){
@@ -155,6 +323,16 @@ $total=$countResult
             <div class="brand">
                 <span class="brand-icon">👨‍💼</span>
                 <h1>Employee Management System</h1>
+            </div>
+
+            <div class="topbar-actions">
+                <span class="user-pill">
+                    <?= $currentUser ?>
+                </span>
+
+                <a class="btn btn-topbar" href="?logout=1">
+                    Logout
+                </a>
             </div>
         </div>
     </header>
@@ -328,7 +506,7 @@ $total=$countResult
     </main>
 
     <footer class="footer">
-        <p>Employee Management System • Version 3.0.0</p>
+        <p>Employee Management System • Version 3.2.0</p>
     </footer>
 
     <script src="assets/js/app.js"></script>

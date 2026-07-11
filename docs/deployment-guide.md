@@ -55,6 +55,8 @@ Configure these repository secrets before running the deployment workflow.
 | `DB_USER` | Database username |
 | `DB_PASS` | Database password |
 | `DB_NAME` | Database name, for example `employeedb` |
+| `AUTH_ADMIN_USER` | Initial admin login username |
+| `AUTH_ADMIN_PASS` | Initial admin login password |
 
 Do not commit secrets into the repository.
 
@@ -194,8 +196,11 @@ After deployment:
 - SSM command succeeded on all target instances
 - ALB target group shows healthy targets
 - Application loads through the ALB DNS name
+- Login page appears before the dashboard
+- Admin login works with configured credentials
 - Add, search, edit, and delete employee flows work
-- Footer shows `Employee Management System • Version 3.0.0`
+- Logout returns to the login page
+- Footer shows `Employee Management System • Version 3.2.0`
 - `http://localhost/healthcheck.php` returns `OK` on EC2
 
 ## Useful EC2 Commands
@@ -239,4 +244,4 @@ Then rerun the GitHub Actions workflow on `main`.
 
 ## Version
 
-Current documented milestone: `v3.0.0`
+Current documented milestone: `v3.2.0`

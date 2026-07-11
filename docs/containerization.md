@@ -13,6 +13,8 @@ The local Docker stack runs:
   - `DB_USER`
   - `DB_PASS`
   - `DB_NAME`
+  - `AUTH_ADMIN_USER`
+  - `AUTH_ADMIN_PASS`
 
 ## Files
 
@@ -102,6 +104,8 @@ The MySQL container uses these development-only values:
 | `MYSQL_USER` | `employee_user` |
 | `MYSQL_PASSWORD` | `employee_pass` |
 | `MYSQL_ROOT_PASSWORD` | `root_pass` |
+| `AUTH_ADMIN_USER` | `admin` |
+| `AUTH_ADMIN_PASS` | `ChangeMe123!` |
 
 The MySQL port is exposed locally as:
 
@@ -150,6 +154,7 @@ docker run --rm -p 8080:80 \
 
 - App opens at `http://localhost:8080`
 - Health check returns `OK`
+- Login works with `admin` / `ChangeMe123!`
 - Add Employee works
 - Search Employee works
 - Edit Employee pre-fills name and address

@@ -213,6 +213,8 @@ jobs:
             --arg dbuser "${{ secrets.DB_USER }}" \
             --arg dbpass "${{ secrets.DB_PASS }}" \
             --arg dbname "${{ secrets.DB_NAME }}" \
+            --arg authuser "${{ secrets.AUTH_ADMIN_USER }}" \
+            --arg authpass "${{ secrets.AUTH_ADMIN_PASS }}" \
             '{
               commands: [
                 "set -Eeuo pipefail",
@@ -230,6 +232,8 @@ jobs:
                 ("export DB_USER=\"" + $dbuser + "\""),
                 ("export DB_PASS=\"" + $dbpass + "\""),
                 ("export DB_NAME=\"" + $dbname + "\""),
+                ("export AUTH_ADMIN_USER=\"" + $authuser + "\""),
+                ("export AUTH_ADMIN_PASS=\"" + $authpass + "\""),
                 "bash scripts/bootstrap.sh"
               ]
             }' > ssm-parameters.json
@@ -244,7 +248,7 @@ jobs:
 
           COMMAND_ID=$(aws ssm send-command \
             --document-name "AWS-RunShellScript" \
-            --comment "Employee Management Deployment v2.1" \
+            --comment "Employee Management Deployment v3.2" \
             --instance-ids ${{ steps.discover.outputs.instance_ids }} \
             --parameters file://ssm-parameters.json \
             --query "Command.CommandId" \

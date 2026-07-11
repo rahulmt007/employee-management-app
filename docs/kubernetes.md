@@ -33,7 +33,7 @@ Use AWS EKS later only if you intentionally want a production Kubernetes deploym
 | --- | --- |
 | `k8s/namespace.yaml` | Creates the `employee-management` namespace |
 | `k8s/configmap.yaml` | Stores `DB_HOST` and `DB_NAME` |
-| `k8s/secret.example.yaml` | Example secret values for local development |
+| `k8s/secret.example.yaml` | Example database and auth secret values for local development |
 | `k8s/deployment.yaml` | Runs the PHP app pods |
 | `k8s/service.yaml` | Exposes the app inside the cluster |
 | `k8s/ingress.yaml` | Optional HTTP ingress route |
@@ -155,6 +155,8 @@ kubectl create secret generic employee-db-secret \
   -n employee-management \
   --from-literal=DB_USER='<db-user>' \
   --from-literal=DB_PASS='<db-password>' \
+  --from-literal=AUTH_ADMIN_USER='<admin-user>' \
+  --from-literal=AUTH_ADMIN_PASS='<strong-admin-password>' \
   --from-literal=MYSQL_ROOT_PASSWORD='unused-for-rds'
 ```
 
@@ -165,6 +167,7 @@ Do not apply `k8s/mysql-dev.yaml` when using RDS.
 - App Deployment has desired replicas available
 - Service exists and points to app pods
 - Health check endpoint returns `OK`
+- Login works with configured admin credentials
 - Add Employee works
 - Search Employee works
 - Edit Employee pre-fills values

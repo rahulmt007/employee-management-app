@@ -28,6 +28,7 @@ This project demonstrates both application development and DevOps delivery:
 - Search employees by name
 - Edit employee name and address
 - Delete employee records
+- Session-based admin authentication
 - Health check endpoint for deployment verification
 - Release-based deployment under `/opt/employee-app`
 - Local Docker Compose environment
@@ -37,8 +38,8 @@ This project demonstrates both application development and DevOps delivery:
 
 | Item | Value |
 | --- | --- |
-| Application version | `v3.0.0` |
-| Containerization release candidate | `v3.1.0` |
+| Application version | `v3.2.0` |
+| Containerization release | `v3.1.0` |
 | Latest runtime fix commit | `22258c7` |
 | Employee edit feature commit | `25d9f90` |
 | Region | `us-east-1` |
@@ -185,6 +186,19 @@ The Compose stack runs:
 
 See [Containerization Guide](docs/containerization.md).
 
+## Authentication
+
+The app includes simple PHP session authentication.
+
+- Login is required before viewing or changing employee records.
+- Passwords are stored with PHP `password_hash()`.
+- The initial admin user is seeded from `AUTH_ADMIN_USER` and `AUTH_ADMIN_PASS`.
+- Local demo defaults are `admin` / `ChangeMe123!`.
+
+For AWS or any shared environment, configure stronger credentials before deployment.
+
+See [Authentication Guide](docs/authentication.md).
+
 ## Kubernetes Manifests
 
 Kubernetes manifests are included under `k8s/` for local demos or future production adaptation:
@@ -234,6 +248,8 @@ Benefits:
 - [Containerization Guide](docs/containerization.md)
 - [Kubernetes Guide](docs/kubernetes.md)
 - [v3.1.0 Release Notes](docs/releases/v3.1.0.md)
+- [Authentication Guide](docs/authentication.md)
+- [v3.2.0 Release Notes](docs/releases/v3.2.0.md)
 - [AWS Teardown Guide](docs/aws-teardown.md)
 
 ## Repository Structure

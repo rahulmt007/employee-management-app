@@ -11,6 +11,8 @@ services:
       DB_USER: employee_user
       DB_PASS: employee_pass
       DB_NAME: employeedb
+      AUTH_ADMIN_USER: admin
+      AUTH_ADMIN_PASS: ChangeMe123!
     depends_on:
       db:
         condition: service_healthy

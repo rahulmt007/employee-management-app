@@ -195,8 +195,9 @@ The project includes screenshots and configuration evidence for:
 
 ## Current Milestone
 
-The documented application milestone is `v3.0.0`, which includes:
+The documented application milestone is `v3.2.0`, which includes:
 
+- Session-based admin login
 - Add employee
 - View employee directory
 - Search employee

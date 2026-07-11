@@ -10,6 +10,8 @@ DB_HOST="${DB_HOST:?DB_HOST is not set}"
 DB_USER="${DB_USER:?DB_USER is not set}"
 DB_PASS="${DB_PASS:?DB_PASS is not set}"
 DB_NAME="${DB_NAME:?DB_NAME is not set}"
+AUTH_ADMIN_USER="${AUTH_ADMIN_USER:-admin}"
+AUTH_ADMIN_PASS="${AUTH_ADMIN_PASS:-ChangeMe123!}"
 
 APACHE_RESTART_REQUIRED=0
 
@@ -19,10 +21,12 @@ write_apache_env_config() {
     TMP_FILE="$(mktemp)"
 
     cat > "$TMP_FILE" <<EOF
-SetEnv DB_HOST ${DB_HOST}
-SetEnv DB_USER ${DB_USER}
-SetEnv DB_PASS ${DB_PASS}
-SetEnv DB_NAME ${DB_NAME}
+SetEnv DB_HOST "${DB_HOST}"
+SetEnv DB_USER "${DB_USER}"
+SetEnv DB_PASS "${DB_PASS}"
+SetEnv DB_NAME "${DB_NAME}"
+SetEnv AUTH_ADMIN_USER "${AUTH_ADMIN_USER}"
+SetEnv AUTH_ADMIN_PASS "${AUTH_ADMIN_PASS}"
 EOF
 
     if [[ ! -f "$APACHE_ENV_FILE" ]] || ! cmp -s "$TMP_FILE" "$APACHE_ENV_FILE"; then
@@ -72,7 +76,7 @@ restart_php_fpm_if_available() {
 
 write_apache_env_config
 
-export DB_HOST DB_USER DB_PASS DB_NAME
+export DB_HOST DB_USER DB_PASS DB_NAME AUTH_ADMIN_USER AUTH_ADMIN_PASS
 verify_database_connection
 
 info "Creating release directory..."

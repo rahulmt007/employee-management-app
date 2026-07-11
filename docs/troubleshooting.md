@@ -271,6 +271,34 @@ sudo systemctl restart php-fpm
 sudo systemctl restart httpd
 ```
 
+## Login Fails
+
+### Symptoms
+
+The login page appears, but valid-looking credentials do not work.
+
+### Common Causes
+
+- `AUTH_ADMIN_USER` or `AUTH_ADMIN_PASS` changed after the first user was seeded
+- Incorrect GitHub Actions secrets
+- Existing `users` table already contains a different admin account
+- Browser is using an old session
+
+### Resolution
+
+The initial admin is created only when the `users` table is empty.
+
+For local Docker demos, reset the database volume:
+
+```bash
+docker compose down -v
+docker compose up --build
+```
+
+For AWS/RDS, inspect the `users` table carefully and reset the password intentionally. Do not expose password hashes or credentials in screenshots.
+
+Then clear browser cookies or use an incognito window and retry login.
+
 ## Deployment Verification Fails
 
 ### Symptoms
@@ -375,4 +403,4 @@ aws ssm get-command-invocation \
 
 ## Version
 
-Current documented milestone: `v3.0.0`
+Current documented milestone: `v3.2.0`

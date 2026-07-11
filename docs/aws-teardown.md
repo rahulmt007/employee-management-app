@@ -33,7 +33,7 @@ Record these non-secret details in documentation:
 | Region | `us-east-1` |
 | Auto Scaling Group | `capstone-asg` |
 | Artifact Bucket | `rahulmt007-employee-management-artifacts` |
-| Latest application version | `v3.0.0` |
+| Latest application version | `v3.2.0` |
 | GitHub repository | `rahulmt007/employee-management-app` |
 
 Do not document or commit:

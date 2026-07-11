@@ -35,6 +35,10 @@ body {
     width: 92%;
     max-width: 1180px;
     margin: 0 auto;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 20px;
 }
 
 .brand {
@@ -61,10 +65,86 @@ body {
     letter-spacing: -0.03em;
 }
 
+.topbar-actions {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+}
+
+.user-pill {
+    display: inline-flex;
+    align-items: center;
+    min-height: 38px;
+    padding: 8px 12px;
+    border-radius: 12px;
+    background: rgba(255, 255, 255, 0.16);
+    color: white;
+    font-size: 14px;
+    font-weight: 700;
+}
+
 .page {
     width: 92%;
     max-width: 1180px;
     margin: 32px auto;
+}
+
+.auth-body {
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background:
+        linear-gradient(135deg, rgba(37, 99, 235, 0.12), rgba(15, 23, 42, 0.06)),
+        var(--background);
+}
+
+.auth-page {
+    width: 92%;
+    max-width: 460px;
+}
+
+.auth-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 28px;
+    box-shadow: var(--shadow);
+}
+
+.auth-brand {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    margin-bottom: 24px;
+}
+
+.auth-brand h1 {
+    margin: 0;
+    font-size: 24px;
+    color: var(--secondary);
+}
+
+.auth-brand p {
+    margin: 6px 0 0;
+    color: var(--muted);
+    font-size: 14px;
+}
+
+.alert {
+    border-radius: 12px;
+    padding: 12px 14px;
+    font-size: 14px;
+    font-weight: 700;
+    margin-bottom: 18px;
+}
+
+.alert-error {
+    background: var(--danger-bg);
+    color: var(--danger);
+    border: 1px solid #fecaca;
 }
 
 .stats-grid {
@@ -222,6 +302,17 @@ input:focus {
     background: #e2e8f0;
 }
 
+.btn-topbar {
+    background: rgba(15, 23, 42, 0.28);
+    color: white;
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    padding: 10px 14px;
+}
+
+.btn-topbar:hover {
+    background: rgba(15, 23, 42, 0.42);
+}
+
 .directory-card {
     padding: 0;
     overflow: hidden;
@@ -325,6 +416,11 @@ tbody tr:hover {
 }
 
 @media (max-width: 768px) {
+    .topbar-content {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+
     .brand h1 {
         font-size: 22px;
     }
