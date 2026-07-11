@@ -8,9 +8,11 @@ Authentication protects the employee dashboard and CRUD operations. The public h
 
 ## How It Works
 
-- `index.php` starts a PHP session.
+- `index.php` connects to MySQL and starts a PHP session.
 - A `users` table is created automatically if it does not exist.
+- A `sessions` table is created automatically if it does not exist.
 - If the `users` table is empty, the app seeds one admin user.
+- PHP session data is stored in MySQL so logins survive ALB routing across multiple EC2 instances.
 - Passwords are stored with PHP `password_hash()`.
 - Login verification uses `password_verify()`.
 - Successful login regenerates the session ID.
@@ -26,6 +28,18 @@ CREATE TABLE users (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 ```
+
+## Sessions Table
+
+```sql
+CREATE TABLE sessions (
+    id VARCHAR(128) PRIMARY KEY,
+    session_data TEXT NOT NULL,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+);
+```
+
+The application uses a custom PHP session handler backed by this table. This avoids the production issue where a login request writes a file-based PHP session on one EC2 instance, but the redirected request is served by another instance behind the Application Load Balancer.
 
 ## Admin Seed Variables
 

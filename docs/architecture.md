@@ -198,6 +198,7 @@ The project includes screenshots and configuration evidence for:
 The documented application milestone is `v3.2.0`, which includes:
 
 - Session-based admin login
+- MySQL-backed PHP session storage for ALB and Auto Scaling compatibility
 - Add employee
 - View employee directory
 - Search employee

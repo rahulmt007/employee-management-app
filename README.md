@@ -192,6 +192,7 @@ The app includes simple PHP session authentication.
 
 - Login is required before viewing or changing employee records.
 - Passwords are stored with PHP `password_hash()`.
+- Session data is stored in MySQL so authentication works across ALB-routed EC2 instances.
 - The initial admin user is seeded from `AUTH_ADMIN_USER` and `AUTH_ADMIN_PASS`.
 - Local demo defaults are `admin` / `ChangeMe123!`.
 

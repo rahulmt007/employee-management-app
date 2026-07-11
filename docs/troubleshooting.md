@@ -277,14 +277,19 @@ sudo systemctl restart httpd
 
 The login page appears, but valid-looking credentials do not work.
 
+If browser DevTools shows a `302` after submitting the login form and the next request still displays the login page, credentials were likely accepted but the PHP session was not available on the redirected request.
+
 ### Common Causes
 
+- File-based PHP sessions are being used behind an ALB with multiple EC2 instances
 - `AUTH_ADMIN_USER` or `AUTH_ADMIN_PASS` changed after the first user was seeded
 - Incorrect GitHub Actions secrets
 - Existing `users` table already contains a different admin account
 - Browser is using an old session
 
 ### Resolution
+
+Version `v3.2.0` stores PHP sessions in MySQL using the automatic `sessions` table. Redeploy the latest commit to all instances and clear browser cookies or use an incognito window.
 
 The initial admin is created only when the `users` table is empty.
 

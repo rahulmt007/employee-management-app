@@ -1,7 +1,5 @@
 <?php
 
-session_start();
-
 $host     = getenv('DB_HOST');
 $user     = getenv('DB_USER');
 $password = getenv('DB_PASS');
@@ -21,6 +19,92 @@ if ($conn->connect_error) {
     die("Database connection failed");
 }
 
+class DatabaseSessionHandler implements SessionHandlerInterface
+{
+    private mysqli $conn;
+
+    public function __construct(mysqli $conn)
+    {
+        $this->conn = $conn;
+    }
+
+    public function open(string $path, string $name): bool
+    {
+        return true;
+    }
+
+    public function close(): bool
+    {
+        return true;
+    }
+
+    public function read(string $id): string|false
+    {
+        $stmt = $this->conn->prepare("
+            SELECT session_data
+            FROM sessions
+            WHERE id=?
+            LIMIT 1
+        ");
+
+        $stmt->bind_param("s", $id);
+        $stmt->execute();
+        $result = $stmt->get_result();
+        $record = $result->fetch_assoc();
+        $stmt->close();
+
+        return $record ? $record['session_data'] : "";
+    }
+
+    public function write(string $id, string $data): bool
+    {
+        $stmt = $this->conn->prepare("
+            INSERT INTO sessions(id, session_data, updated_at)
+            VALUES(?, ?, NOW())
+            ON DUPLICATE KEY UPDATE
+                session_data=VALUES(session_data),
+                updated_at=NOW()
+        ");
+
+        $stmt->bind_param("ss", $id, $data);
+        $success = $stmt->execute();
+        $stmt->close();
+
+        return $success;
+    }
+
+    public function destroy(string $id): bool
+    {
+        $stmt = $this->conn->prepare("
+            DELETE FROM sessions
+            WHERE id=?
+        ");
+
+        $stmt->bind_param("s", $id);
+        $success = $stmt->execute();
+        $stmt->close();
+
+        return $success;
+    }
+
+    public function gc(int $max_lifetime): int|false
+    {
+        $expiresBefore = time() - $max_lifetime;
+
+        $stmt = $this->conn->prepare("
+            DELETE FROM sessions
+            WHERE updated_at < FROM_UNIXTIME(?)
+        ");
+
+        $stmt->bind_param("i", $expiresBefore);
+        $stmt->execute();
+        $affectedRows = $stmt->affected_rows;
+        $stmt->close();
+
+        return $affectedRows;
+    }
+}
+
 // Create table
 $conn->query("
 CREATE TABLE IF NOT EXISTS employees (
@@ -30,6 +114,18 @@ address VARCHAR(200) NOT NULL,
 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 )
 ");
+
+// Create sessions table for load-balanced deployments
+$conn->query("
+CREATE TABLE IF NOT EXISTS sessions (
+id VARCHAR(128) PRIMARY KEY,
+session_data TEXT NOT NULL,
+updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+)
+");
+
+session_set_save_handler(new DatabaseSessionHandler($conn), true);
+session_start();
 
 // Create users table
 $conn->query("
@@ -187,6 +283,7 @@ if(!$isAuthenticated):
 
 <?php
 
+session_write_close();
 $conn->close();
 
 exit();
@@ -505,7 +602,7 @@ $total=$countResult
     </main>
 
     <footer class="footer">
-        <p>Employee Management System • Version 3.2.0</p>
+        <p>Employee Management System &bull; Version 3.2.0</p>
     </footer>
 
     <script src="assets/js/app.js"></script>
@@ -516,6 +613,7 @@ $total=$countResult
 
 <?php
 
+session_write_close();
 $conn->close();
 
 ?>
