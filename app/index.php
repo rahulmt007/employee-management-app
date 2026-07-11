@@ -135,10 +135,9 @@ if(!$isAuthenticated):
     <main class="auth-page">
         <section class="auth-card">
             <div class="auth-brand">
-                <span class="brand-icon">ðŸ‘¨â€ðŸ’¼</span>
+                <span class="brand-icon">ID</span>
                 <div>
                     <h1>Employee Management System</h1>
-                    <p>Sign in to manage employee records.</p>
                 </div>
             </div>
 
@@ -321,7 +320,7 @@ $total=$countResult
     <header class="topbar">
         <div class="topbar-content">
             <div class="brand">
-                <span class="brand-icon">👨‍💼</span>
+                <span class="brand-icon">ID</span>
                 <h1>Employee Management System</h1>
             </div>
 
